@@ -368,6 +368,23 @@ label.field span { display: block; font-size: 13px; color: var(--muted); margin-
 html { scrollbar-width: none; }
 html::-webkit-scrollbar, body::-webkit-scrollbar { display: none; }
 
+/* Tarjeta "Esta semana" */
+.week-card { padding: 18px; }
+.week-card h3 { font-size: 18px; margin: 0; }
+.goal-pill { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 999px; font-weight: 700; font-size: 14px; background: var(--accent-soft); color: var(--accent); }
+.goal-pill.done { background: rgba(53, 211, 154, .14); color: var(--ok); }
+.wk-days { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; margin: 18px 0 16px; }
+.wk-day { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.wk-day b { width: 100%; max-width: 44px; aspect-ratio: 1; border-radius: 50%; background: var(--surface-2); display: flex; align-items: center; justify-content: center; color: #1a0d00; }
+.wk-day span { font-size: 13px; color: var(--muted); font-weight: 600; }
+.wk-day.done b { background: linear-gradient(135deg, #ff9a3c, var(--accent-2)); box-shadow: 0 4px 16px rgba(255, 106, 40, .45); }
+.wk-day.done b .i { stroke-width: 3; }
+.wk-day.today b { box-shadow: inset 0 0 0 2.5px var(--accent); }
+.wk-day.today.done b { box-shadow: 0 4px 18px rgba(255, 106, 40, .6); }
+.wk-day.today span { color: var(--accent); font-weight: 800; }
+.wk-bar { height: 8px; background: var(--surface-2); border-radius: 99px; overflow: hidden; margin-bottom: 8px; }
+.wk-bar i { display: block; height: 100%; border-radius: 99px; background: linear-gradient(90deg, var(--accent-2), #ffb347); transition: width .4s ease; }
+
 /* Progresión */
 .tag.prog { background: rgba(53, 211, 154, .14); color: var(--ok); font-weight: 650; vertical-align: middle; }
 .reason.prog { color: var(--ok); }

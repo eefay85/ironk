@@ -546,12 +546,13 @@ function recovery() {
   return out;
 }
 
-function todayPlan() {
+// ignoreToday: calcula el próximo entrenamiento aunque ya hayas entrenado hoy.
+function todayPlan({ ignoreToday = false } = {}) {
   const p = db.profile;
   const today = dayKey(new Date());
   const doneToday = db.sessions.filter(s => dayKey(s.date) === today);
   const mobility = routineById('p-movilidad');
-  if (doneToday.length) return { kind: 'done', session: doneToday[doneToday.length - 1], routine: mobility };
+  if (doneToday.length && !ignoreToday) return { kind: 'done', session: doneToday[doneToday.length - 1], routine: mobility };
 
   const last = db.sessions[db.sessions.length - 1];
   const yesterday = last && dayKey(last.date) === dayKey(Date.now() - DAY);

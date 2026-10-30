@@ -140,6 +140,25 @@ function lineChart(points, fmt = v => v) {
   </svg>`;
 }
 
+// Tarjeta "Esta semana": días entrenados con check, hoy marcado y barra hacia la meta.
+function weekCard() {
+  const p = db.profile, week = sessionsThisWeek(), goal = p.days;
+  const ws = weekStart(new Date()), days = new Set(db.sessions.map(s => dayKey(s.date))), today = dayKey(new Date());
+  const left = Math.max(0, goal - week), streak = weeksMeetingGoal();
+  const pill = left ? `${icon('target', 16)} Faltan ${left}` : `${icon('check', 16)} ¡Cumplida!`;
+  const sub = left ? `${week} de ${goal} sesiones · faltan ${left}`
+    : `${week} de ${goal} sesiones · ${streak > 1 ? `${streak} semanas seguidas cumpliendo` : '¡gran semana!'}`;
+  return `<div class="card week-card">
+    <div class="row between"><h3>Esta semana</h3><span class="goal-pill ${left ? '' : 'done'}">${pill}</span></div>
+    <div class="wk-days">${['L', 'M', 'M', 'J', 'V', 'S', 'D'].map((l, i) => {
+      const d = new Date(ws); d.setDate(d.getDate() + i);
+      const k = dayKey(d), done = days.has(k), isToday = k === today;
+      return `<div class="wk-day ${done ? 'done' : ''} ${isToday ? 'today' : ''}"><b>${done ? icon('check', 22) : ''}</b><span>${l}</span></div>`;
+    }).join('')}</div>
+    <div class="wk-bar"><i style="width:${Math.min(100, (week / goal) * 100)}%"></i></div>
+    <div class="muted small">${sub}</div></div>`;
+}
+
 function weekStrip() {
   const ws = weekStart(new Date()), days = new Set(db.sessions.map(s => dayKey(s.date))), today = dayKey(new Date());
   return `<div class="week">${['L', 'M', 'M', 'J', 'V', 'S', 'D'].map((l, i) => {
@@ -295,18 +314,17 @@ views.home = () => {
   const last = db.sessions[db.sessions.length - 1];
 
   let hero;
-  if (plan.kind === 'done') {
-    const s = plan.session;
-    hero = `<div class="hero done"><div class="eyebrow">${icon('check', 16)} Hecho por hoy</div>
-      <h2>${esc(s.name)}</h2><p>${fmtDuration(s.duration)} · ${s.sets.length} series · ${fmtKg(sessionVolume(s))}</p>
-      <div class="row wrap"><button class="btn light" data-act="session" data-id="${s.id}">Ver resumen</button>
-      <button class="btn ghost-light" data-act="routine" data-id="p-movilidad">Movilidad extra</button></div></div>`;
-  } else {
-    const r = adaptRoutine(plan.routine), first = routineItems(r)[0];
-    const eyebrow = { train: 'Hoy toca', recovery: 'Hoy: recuperación', rest: 'Día de descanso' }[plan.kind];
-    hero = `<div class="hero ${plan.kind}">
-      <div class="row between"><span class="eyebrow">${icon(plan.kind === 'train' ? 'bolt' : 'moon', 16)} ${eyebrow}</span><span class="pill">${icon('clock', 14)} ~${estimateMin(r)} min</span></div>
-      <div class="hero-body"><div class="grow"><h2>${esc(r.name)}</h2><p>${esc(plan.reason)}</p>
+  {
+    // Si ya entrenaste hoy, muestra el próximo entrenamiento del programa.
+    const trainedToday = plan.kind === 'done';
+    const next = trainedToday ? todayPlan({ ignoreToday: true }) : plan;
+    const r = adaptRoutine(next.routine), first = routineItems(r)[0];
+    const eyebrow = trainedToday ? 'Próximo entrenamiento' : { train: 'Hoy toca', recovery: 'Hoy: recuperación', rest: 'Día de descanso' }[next.kind];
+    const reason = trainedToday ? `Hoy ya entrenaste ${esc(plan.session.name)}. Este es el que sigue.` : esc(next.reason);
+    hero = `<div class="hero ${next.kind}">
+      <div class="row between"><span class="eyebrow">${icon(next.kind === 'train' ? 'bolt' : 'moon', 16)} ${eyebrow}</span>
+        <span class="pill">${icon('clock', 14)} ~${estimateMin(r)} min</span></div>
+      <div class="hero-body"><div class="grow"><h2>${esc(r.name)}</h2><p>${reason}</p>
         <div class="chips">${mainMuscles(r).map(m => `<span class="tag light">${MUSCLES[m]}</span>`).join('')}</div></div>
         <div class="hero-fig" data-demo="${first.ex}"></div></div>
       <div class="row"><button class="btn light grow" data-act="run-start" data-id="${r.id}">${icon('play', 16)} Empezar</button>
@@ -318,11 +336,7 @@ views.home = () => {
     <header class="home-head"><div><div class="muted small cap">${date}</div><h1>Hola${p.name ? ', ' + esc(p.name) : ''}</h1></div>
       <button class="avatar" data-act="tab" data-id="profile">${esc((p.name || 'K')[0].toUpperCase())}</button></header>
     ${rankCard()}
-    <div class="card goal-card">
-      ${ring(week / p.days, 74, 8, `<strong>${week}</strong><small>/${p.days}</small>`)}
-      <div class="grow"><strong>Meta semanal</strong><div class="muted small">${week >= p.days ? '¡Cumplida! Gran semana.' : `Te faltan ${p.days - week} sesión${p.days - week > 1 ? 'es' : ''}`}</div>
-      ${weekStrip()}</div>
-    </div>
+    ${weekCard()}
     ${hero}
     <div class="stats three">
       <div class="stat">${icon('flame', 18, 'accent')}<div class="v">${streakDays()}</div><div class="l">días de racha</div></div>
@@ -1221,11 +1235,7 @@ const progressViews = {
     const efforts = s.filter(x => x.effort);
     const avgEffort = efforts.length ? (efforts.reduce((a, x) => a + x.effort, 0) / efforts.length).toFixed(1) : '—';
     return `
-      <div class="card goal-card">${ring(week / days, 84, 9, `<strong>${week}</strong><small>/${days}</small>`)}
-        <div class="grow"><strong>Esta semana</strong><div class="muted small">${(() => {
-          const n = weeksMeetingGoal();
-          return n ? `${n} semana${n > 1 ? 's' : ''} seguida${n > 1 ? 's' : ''} cumpliendo la meta` : week >= days ? '¡Meta cumplida!' : `Te faltan ${days - week} para cumplir la meta`;
-        })()}</div>${weekStrip()}</div></div>
+      ${weekCard()}
       <div class="stats">
         <div class="stat"><div class="v">${s.length}</div><div class="l">sesiones</div></div>
         <div class="stat"><div class="v">${fmtKg(totalVol)}</div><div class="l">peso total levantado</div></div>
@@ -1320,7 +1330,8 @@ views.session = () => {
     ${s.prs?.length ? `<h2>${icon('trophy', 18, 'accent')} Récords</h2><div class="card pr">${s.prs.map(p => `<div class="list-item"><div class="grow">${esc(exById(p.ex).name)} <span class="muted small">· ${p.type}</span></div><strong class="accent">${p.value}</strong></div>`).join('')}</div>` : ''}
     <h2>Detalle</h2>
     ${byEx.map(g => `<div class="card"><div class="row"><div class="thumb sm">${exerciseThumb(exById(g.ex))}</div><h3 class="grow">${esc(exById(g.ex).name)}</h3></div>${g.sets.map((x, i) => `<div class="list-item"><div class="grow muted">Serie ${i + 1}</div><div>${x.weight ? x.weight + ' kg × ' : ''}${x.secs ? x.secs + ' s' : x.reps + ' reps'}${x.side ? ' /lado' : ''}</div></div>`).join('')}</div>`).join('')}
-    <button class="btn block danger" data-act="session-del" data-id="${s.id}">${icon('trash', 16)} Eliminar del historial</button>`;
+    <button class="btn block danger" data-act="session-del" data-id="${s.id}">${icon('trash', 16)} Eliminar este entrenamiento</button>
+    <p class="muted small center" style="margin-top:6px">Solo borra esta sesión; el resto de tu historial queda igual.</p>`;
 };
 
 // ---------- Perfil ----------
@@ -1627,7 +1638,8 @@ const actions = {
   },
   'discard-session': () => { if (confirm('¿Descartar esta sesión?')) { run = null; tab('home'); } },
   'session-del': el => {
-    if (!confirm('¿Eliminar esta sesión del historial?')) return;
+    const s = db.sessions.find(x => x.id === el.dataset.id);
+    if (!confirm(`¿Eliminar solo este entrenamiento (${s ? `${s.name}, ${fmtDate(s.date)}` : ''})? El resto de tu historial no se toca.`)) return;
     db.sessions = db.sessions.filter(s => s.id !== el.dataset.id); markDeleted(el.dataset.id); saveDb(); back();
   },
 
