@@ -243,7 +243,7 @@ const PHOTOS = {
   deadlift: ['deadlift-1', 'standkb'], rdl: ['standkb', 'rdl-2'], sldl: ['standkb', 'sldl-2'],
   clean: ['swing1-1', 'rack'], dclean: ['dswing-1', 'dfrontsq-1'], snatch: ['swing1-1', 'overhead'],
   press: ['rack', 'overhead'], dpress: ['dfrontsq-1', 'dpress-2'], pushpress: ['rack', 'pushpress-1', 'overhead'],
-  floorpress: ['floorpress-1', 'floorpress-2'], pushup: ['pushup-1', 'pushup-2'], row: ['row-1', 'row-2'],
+  floorpress: ['floorpress-1', 'floorpress-2b'], pushup: ['pushup-1', 'pushup-2'], row: ['row-1', 'row-2'],
   gorillarow: ['gorillarow-1', 'gorillarow-2'], highpull: ['swing1-1', 'highpull-2'], halo: ['halo-1', 'halo-2'],
   tgu: ['tgu-1', 'tgu-2', 'overhead'], windmill: ['overhead', 'windmill-2'], cleanpress: ['swing1-1', 'rack', 'overhead'],
   thruster: ['frontsq-2', 'overhead'], suitcase: ['suitcase-1', 'suitcase-2'], rackcarry: ['rackcarry-1', 'rackcarry-1~espejo'],
