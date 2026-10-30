@@ -439,7 +439,8 @@ views.routine = () => {
     ${db.profile.warmup !== false && !isAmrap(r) ? `<div class="note">${icon('flame', 18)}<span class="small">Incluye 2 min de calentamiento al inicio y estiramientos al final (puedes desactivarlo en Perfil).</span></div>` : ''}
     ${r.notes.length ? `<div class="note">${icon('spark', 18)}<div><strong>Adaptada a ti</strong>${r.notes.map(n => `<div class="small">${esc(n)}</div>`).join('')}</div></div>` : ''}
     ${hasCircuit ? `<div class="note">${icon('repeat', 18)}<span class="small">Incluye un circuito: haces los ejercicios seguidos y descansas al final de cada ronda.</span></div>` : ''}
-    <div class="card"><div class="row between"><strong>${icon('timer', 18, 'accent')} Descanso entre series</strong><span class="muted small">se aplica a todas las rutinas</span></div>${restSeg()}</div>
+    <div class="card"><div class="row between"><strong>${icon('timer', 18, 'accent')} Descanso entre series</strong><span class="muted small">se aplica a todas las rutinas</span></div>${restSeg()}
+      <div class="row between" style="margin-top:10px"><strong>${icon('skip', 16, 'accent')} Avance automático</strong><span class="muted small">sin tocar "Serie hecha"</span></div>${autoSetSeg()}</div>
     <h2>Ejercicios</h2>
     ${items.map(it => {
       const ex = exById(it.ex), sw = suggestWeight(ex);
@@ -601,8 +602,11 @@ function startRun(base, checkin = null) {
 // Arranca la serie actual: timers automáticos (Tabata, calentamiento), ventana de EMOM y voz.
 function enterWork() {
   const s = run.steps[run.i], ex = exById(s.ex);
-  Object.assign(run, { phase: 'work', restEnd: null, timerEnd: null, reps: s.reps, halfSaid: false, windowEnd: s.emom ? Date.now() + s.emom * 1000 : null });
+  Object.assign(run, { phase: 'work', restEnd: null, timerEnd: null, reps: s.reps, halfSaid: false, autoSet: false, windowEnd: s.emom ? Date.now() + s.emom * 1000 : null });
+  tick.lastBeep = null;
   if (s.secs && s.autoStart) { run.timerTotal = s.secs * 1000 * (s.side ? 2 : 1); run.timerEnd = Date.now() + run.timerTotal; }
+  const auto = autoSetSecs(s);
+  if (auto) { run.timerTotal = auto * 1000; run.timerEnd = Date.now() + run.timerTotal; run.autoSet = true; }
   announce(s, ex);
   render();
 }
@@ -648,9 +652,45 @@ function runHead(pct) {
   return `<div class="topbar"><button class="icon-btn" data-act="run-quit" aria-label="Terminar">${icon('close')}</button>
     <div class="title">${esc(run.name)}</div>
     <button class="icon-btn" data-act="voice-toggle" aria-label="Voz del coach">${icon(Voice.on() ? 'volume' : 'mute', 18)}</button>
-    <span class="pill dark" id="elapsed">${fmtTime((Date.now() - run.start) / 1000)}</span></div>
-    <div class="progress"><i style="width:${pct}%"></i></div>`;
+    <button class="icon-btn" data-act="pause" aria-label="Pausa">${icon('pause', 16)}</button>
+    <span class="pill dark" id="elapsed">${fmtTime(((run.paused || Date.now()) - run.start) / 1000)}</span></div>
+    <div class="progress"><i style="width:${pct}%"></i></div>
+    ${run.paused ? `<div class="pause-overlay"><div class="pause-box">
+      <div class="ob-logo">${icon('pause', 40)}</div><h1>En pausa</h1><p class="muted">El tiempo está detenido. Sigue cuando quieras.</p>
+      <button class="btn primary block big" data-act="resume">${icon('play', 18)} Continuar</button>
+      <button class="btn block" style="margin-top:8px" data-act="run-quit">Terminar sesión</button></div></div>` : ''}`;
 }
+
+// Pausa: congela todos los relojes de la sesión y los corre al reanudar.
+function pauseRun() {
+  if (!run || run.paused) return;
+  run.paused = Date.now();
+  Voice.stop(); Voice.say('Pausa');
+  render();
+}
+function resumeRun() {
+  if (!run?.paused) return;
+  const d = Date.now() - run.paused;
+  ['timerEnd', 'restEnd', 'windowEnd', 'endAt'].forEach(k => { if (run[k]) run[k] += d; });
+  run.start += d;
+  run.paused = null; tick.lastBeep = null;
+  Voice.say('Seguimos', true);
+  render();
+}
+
+// Avance automático: tiempo estimado para una serie por repeticiones (0 = desactivado).
+function autoSetSecs(s) {
+  const mode = db.profile.autoSet ?? 'auto';
+  if (mode === 'off' || s.secs) return 0;
+  if (mode !== 'auto') return Number(mode);
+  const ex = exById(s.ex);
+  const perRep = ex.type === 'Balístico' ? 2.2 : ex.type === 'Core' ? 2.5 : 3.5;
+  return Math.round(Math.min(90, Math.max(20, s.reps * perRep * (s.side ? 2 : 1) + 10)));
+}
+
+const AUTO_SET_MODES = [['off', 'No'], ['auto', 'Según reps'], ['45', '45 s'], ['60', '1 min']];
+const autoSetSeg = () => `<div class="seg">${AUTO_SET_MODES.map(([k, l]) =>
+  `<button class="${String(db.profile.autoSet ?? 'auto') === k ? 'on' : ''}" data-act="auto-set" data-id="${k}">${l}</button>`).join('')}</div>`;
 
 views.run = () => {
   const s = run.steps[run.i], ex = exById(s.ex);
@@ -682,9 +722,13 @@ views.run = () => {
       : `<div class="target">${total} s</div>${s.side ? '<p class="muted center">cambia de lado a la mitad</p>' : ''}
          <button class="btn primary block big" data-act="timer-start">${icon('play', 18)} Iniciar</button>`;
   } else {
-    action = `<div class="muted small center">Repeticiones${s.side ? ' por lado' : ''} · objetivo ${s.reps}</div>
+    const auto = run.autoSet && run.timerEnd;
+    action = `${auto ? `<div class="auto-row">${ring((run.timerEnd - Date.now()) / run.timerTotal, 64, 6, `<small id="timer">${fmtTime((run.timerEnd - Date.now()) / 1000)}</small>`, 'ring-work')}
+        <div class="grow muted small">Avanza sola al terminar el tiempo.</div>
+        <button class="btn small" data-act="work-add">+15 s</button></div>` : ''}
+      <div class="muted small center">Repeticiones${s.side ? ' por lado' : ''} · objetivo ${s.reps}</div>
       <div class="stepper"><button data-act="reps" data-d="-1" aria-label="Menos">${icon('minus', 22)}</button><div class="val">${run.reps}</div><button data-act="reps" data-d="1" aria-label="Más">${icon('plus', 22)}</button></div>
-      <button class="btn primary block big" data-act="work-done">${icon('check', 20)} Serie hecha</button>`;
+      <button class="btn primary block big" data-act="work-done">${icon('check', 20)} ${auto ? 'Listo, siguiente' : 'Serie hecha'}</button>`;
   }
 
   return `${head}
@@ -719,22 +763,26 @@ function completeWork(skipped) {
   run.i++;
   if (rest > 0.5 && !skipped) {
     Object.assign(run, { phase: 'rest', restTotal: rest * 1000, restEnd: Date.now() + rest * 1000 });
+    tick.lastBeep = null;
     const nx = exById(run.steps[run.i].ex);
     if (rest > 6) Voice.say(s.emom ? `Descansa hasta el próximo minuto. Luego, ${nx.name}.` : `Descanso, ${Math.round(rest)} segundos. Luego, ${nx.name}.`, true);
     render();
   } else enterWork();
 }
 
-// Cuenta regresiva con voz (o pitidos si la voz está apagada).
+// Cuenta regresiva: la voz dice "tres, dos, uno" de una sola vez (así no se corta) y,
+// si la voz está apagada, suena un pitido por segundo.
 function countdown(left) {
-  if (left <= 3.05 && left > 0 && Math.ceil(left) !== tick.lastBeep) {
-    tick.lastBeep = Math.ceil(left);
-    if (Voice.on()) Voice.say(String(tick.lastBeep), true); else beep(660, 100);
+  const sec = Math.ceil(left);
+  if (left <= 3.05 && left > 0 && sec !== tick.lastBeep) {
+    if (tick.lastBeep == null && sec === 3 && Voice.on()) Voice.countdown();
+    if (!Voice.on()) beep(660, 100);
+    tick.lastBeep = sec;
   }
 }
 
 function tick() {
-  if (!run) return;
+  if (!run || run.paused) return;
   const el = document.getElementById('elapsed');
   if (el) el.textContent = fmtTime((Date.now() - run.start) / 1000);
   if (run.mode === 'amrap') return tickAmrap();
@@ -751,7 +799,7 @@ function tick() {
   if (run.phase === 'rest') setRing('ring-rest', left / (run.restTotal / 1000));
   else {
     setRing('ring-work', left / (run.timerTotal / 1000));
-    if (s.side && !run.halfSaid && left <= run.timerTotal / 2000) { run.halfSaid = true; beep(880, 150); Voice.say('Cambia de lado', true); }
+    if (s.secs && s.side && !run.halfSaid && left <= run.timerTotal / 2000) { run.halfSaid = true; beep(880, 150); Voice.say('Cambia de lado', true); }
   }
   countdown(left);
   if (left <= 0) {
@@ -768,6 +816,7 @@ function tick() {
 function startAmrap(routine, common, notes) {
   const b = routine.blocks.find(x => x.amrap);
   run = { ...common, mode: 'amrap', items: b.circuit, minutes: b.amrap, endAt: Date.now() + b.amrap * 60000, rounds: 0, pos: 0, reps: b.circuit[0].reps, lastMin: b.amrap };
+  tick.lastBeep = null;
   requestWakeLock();
   route = { name: 'amrap', params: {} }; stack = [];
   if (notes.length) toast(notes[0]);
@@ -861,6 +910,7 @@ function tickTest() {
       tick.lastBeep = null;
       Voice.say('¡Ya!', true); beep(990, 300);
       Object.assign(run, { stage: 'go', start: Date.now(), endAt: run.test.secs ? Date.now() + run.test.secs * 1000 : null });
+      tick.lastBeep = null;
       render();
     }
   } else if (run.stage === 'go' && run.endAt) {
@@ -1284,6 +1334,9 @@ views.profile = () => {
       <div class="muted small" style="margin-top:12px">Descanso entre series</div>
       ${restSeg()}
       <div class="muted small">"Recomendado" usa el descanso pensado para cada rutina y tu nivel. Durante el descanso también puedes sumar o restar 15 s.</div>
+      <div class="muted small" style="margin-top:12px">Avance automático entre series</div>
+      ${autoSetSeg()}
+      <div class="muted small">"Según reps" calcula el tiempo de cada serie (por ejemplo, 10 swings ≈ 32 s). Siempre puedes tocar "Listo" antes o sumar 15 s.</div>
       <div class="kv" style="margin-top:12px"><span>${icon('volume', 16)} Voz del coach</span>
         <div class="seg mini">${[[true, 'Sí'], [false, 'No']].map(([v, l]) => `<button class="${(p.voice !== false) === v ? 'on' : ''}" data-act="p-toggle" data-field="voice" data-id="${v}">${l}</button>`).join('')}</div></div>
       <div class="kv"><span>${icon('flame', 16)} Calentamiento y estiramiento</span>
@@ -1400,6 +1453,10 @@ const actions = {
     const ex = { free: run.ex, amrap: run.items?.[run.pos]?.ex, test: run.test?.ex }[run.mode] || run.steps[run.i].ex;
     run.weights[ex] = Number(el.dataset.id); render();
   },
+  pause: () => pauseRun(),
+  resume: () => resumeRun(),
+  'work-add': () => { run.timerEnd += 15000; run.timerTotal += 15000; tick.lastBeep = null; tick(); },
+  'auto-set': el => { db.profile.autoSet = el.dataset.id; touchSettings(); saveDb(); render(); },
   'voice-toggle': () => {
     db.profile.voice = db.profile.voice === false; touchSettings(); saveDb();
     if (!Voice.on()) Voice.stop(); else Voice.say('Voz activada');
@@ -1439,7 +1496,7 @@ const actions = {
   't-go': () => askCheckin(buildTimerRoutine(route.params)),
   'go-tests': () => go('tests'),
   'test-go': el => startTest(TESTS.find(t => t.id === el.dataset.id)),
-  'test-start': () => { Object.assign(run, { stage: 'count', endAt: Date.now() + 3000 }); render(); },
+  'test-start': () => { tick.lastBeep = null; Object.assign(run, { stage: 'count', endAt: Date.now() + 3050 }); render(); },
   'test-tap': () => {
     run.count++; if (navigator.vibrate) navigator.vibrate(15);
     const el = document.getElementById('test-count'); if (el) el.textContent = run.count;

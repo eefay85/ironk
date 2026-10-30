@@ -249,10 +249,12 @@ const PHOTOS = {
   thruster: ['frontsq-2', 'overhead'], suitcase: ['suitcase-1', 'suitcase-2'], rackcarry: ['rackcarry-1', 'rackcarry-1~espejo'],
   russiantwist: ['russiantwist-1', 'russiantwist-1~espejo'], aroundworld: ['aroundworld-1', 'aroundworld-2'],
   figure8: ['figure8-1', 'figure8-1~espejo'], plankdrag: ['plankdrag-1', 'plankdrag-2'],
+  'st-sentadilla': ['st-sentadilla'], 'st-isquios': ['st-isquios'], 'st-cadera': ['st-cadera'], 'st-hombros': ['st-hombros'],
 };
 const PHOTO_LABELS = {
   pushpress: ['Rack', 'Flexión corta', 'Impulsa y bloquea'], tgu: ['Acostado, brazo arriba', 'Rodilla al suelo', 'De pie'],
   cleanpress: ['Carga', 'Cargada', 'Press'], dclean: ['Carga', 'Recibe en rack'],
+  'st-sentadilla': ['Abajo y mantén'], 'st-isquios': ['Cadera atrás y mantén'], 'st-cadera': ['Cadera adelante y mantén'], 'st-hombros': ['Estira hacia arriba'],
 };
 // Estiramientos para la vuelta a la calma (sin pesa, con figura animada).
 EXERCISES.push(

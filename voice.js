@@ -3,6 +3,7 @@
 
 const Voice = {
   voice: null,
+  protectUntil: 0, // mientras dura la cuenta regresiva, nada la interrumpe
 
   on() { return !!window.speechSynthesis && db.profile?.voice !== false; },
 
@@ -13,20 +14,27 @@ const Voice = {
   },
 
   // urgent: corta lo que esté diciendo (para cuentas regresivas y cambios de fase).
-  say(text, urgent = false) {
+  say(text, urgent = false, rate = 1.05) {
     if (!this.on() || !text) return;
     try {
       if (!this.voice) this.pickVoice();
-      if (urgent) speechSynthesis.cancel();
+      if (urgent && Date.now() >= this.protectUntil) speechSynthesis.cancel();
       const u = new SpeechSynthesisUtterance(text);
       u.lang = this.voice?.lang || 'es-ES';
       if (this.voice) u.voice = this.voice;
-      u.rate = 1.05;
+      u.rate = rate;
       speechSynthesis.speak(u);
     } catch (e) { /* sin voz disponible */ }
   },
 
-  stop() { try { speechSynthesis.cancel(); } catch (e) { /* nada */ } },
+  // Una sola frase, con pausas, para que se escuchen los tres números aunque la voz tarde en arrancar.
+  countdown() {
+    this.protectUntil = 0;
+    this.say('Tres... dos... uno...', true, 0.9);
+    this.protectUntil = Date.now() + 3500;
+  },
+
+  stop() { this.protectUntil = 0; try { speechSynthesis.cancel(); } catch (e) { /* nada */ } },
 };
 
 if (window.speechSynthesis) speechSynthesis.onvoiceschanged = () => Voice.pickVoice();

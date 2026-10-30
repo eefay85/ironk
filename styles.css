@@ -364,6 +364,18 @@ label.field span { display: block; font-size: 13px; color: var(--muted); margin-
 
 .prof-head { display: flex; align-items: center; gap: 14px; padding-top: 22px; }
 
+/* Sin barra de desplazamiento visible (en la PC aparecía unos segundos en cada toque). */
+html { scrollbar-width: none; }
+html::-webkit-scrollbar, body::-webkit-scrollbar { display: none; }
+
+/* Pausa y avance automático */
+.pause-overlay { position: fixed; inset: 0; z-index: 30; background: rgba(8, 9, 11, .88); backdrop-filter: blur(8px); display: flex; align-items: center; justify-content: center; padding: 24px; }
+.pause-box { width: 100%; max-width: 380px; text-align: center; }
+.pause-box h1 { margin-top: 14px; }
+.auto-row { display: flex; align-items: center; gap: 12px; text-align: left; background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 10px 12px; margin: 8px 0 12px; }
+.auto-row .ring { margin: 0; }
+.auto-row small#timer { font-size: 14px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
+
 /* ---------- Novedades: rango, desafíos, programa, timers, tests, resumen ---------- */
 .rank-card { display: flex; align-items: center; gap: 12px; }
 .rank-card .bar { margin: 6px 0 4px; }
