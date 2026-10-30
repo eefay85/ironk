@@ -377,6 +377,9 @@ html::-webkit-scrollbar, body::-webkit-scrollbar { display: none; }
 .wk-day { display: flex; flex-direction: column; align-items: center; gap: 8px; }
 .wk-day b { width: 100%; max-width: 44px; aspect-ratio: 1; border-radius: 50%; background: var(--surface-2); display: flex; align-items: center; justify-content: center; color: #1a0d00; }
 .wk-day span { font-size: 13px; color: var(--muted); font-weight: 600; }
+.wk-day span small { font-size: 11px; font-weight: 500; }
+.wk-day b em { font-style: normal; font-size: 15px; font-weight: 700; color: var(--muted); }
+.wk-day.today b em { color: var(--accent); font-size: 16px; }
 .wk-day.done b { background: linear-gradient(135deg, #ff9a3c, var(--accent-2)); box-shadow: 0 4px 16px rgba(255, 106, 40, .45); }
 .wk-day.done b .i { stroke-width: 3; }
 .wk-day.today b { box-shadow: inset 0 0 0 2.5px var(--accent); }

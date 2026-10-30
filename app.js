@@ -153,7 +153,8 @@ function weekCard() {
     <div class="wk-days">${['L', 'M', 'M', 'J', 'V', 'S', 'D'].map((l, i) => {
       const d = new Date(ws); d.setDate(d.getDate() + i);
       const k = dayKey(d), done = days.has(k), isToday = k === today;
-      return `<div class="wk-day ${done ? 'done' : ''} ${isToday ? 'today' : ''}"><b>${done ? icon('check', 22) : ''}</b><span>${l}</span></div>`;
+      return `<div class="wk-day ${done ? 'done' : ''} ${isToday ? 'today' : ''}" title="${fmtDate(d, { weekday: 'long', day: 'numeric', month: 'long' })}">
+        <b>${done ? icon('check', 22) : `<em>${d.getDate()}</em>`}</b><span>${l}</span></div>`;
     }).join('')}</div>
     <div class="wk-bar"><i style="width:${Math.min(100, (week / goal) * 100)}%"></i></div>
     <div class="muted small">${sub}</div></div>`;
