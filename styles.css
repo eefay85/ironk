@@ -368,6 +368,15 @@ label.field span { display: block; font-size: 13px; color: var(--muted); margin-
 html { scrollbar-width: none; }
 html::-webkit-scrollbar, body::-webkit-scrollbar { display: none; }
 
+/* Progresión */
+.tag.prog { background: rgba(53, 211, 154, .14); color: var(--ok); font-weight: 650; vertical-align: middle; }
+.reason.prog { color: var(--ok); }
+.prog-card .steps-bar { display: flex; gap: 5px; align-items: center; margin: 10px 0 6px; }
+.prog-card .steps-bar i { flex: 1; height: 8px; border-radius: 4px; background: var(--surface-3); }
+.prog-card .steps-bar i.on { background: var(--ok); }
+.prog-card .steps-bar b { width: 26px; height: 26px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: var(--surface-3); color: var(--muted); }
+.prog-card .steps-bar b.on { background: var(--accent); color: #1a0d00; }
+
 /* Pausa y avance automático */
 .pause-overlay { position: fixed; inset: 0; z-index: 30; background: rgba(8, 9, 11, .88); backdrop-filter: blur(8px); display: flex; align-items: center; justify-content: center; padding: 24px; }
 .pause-box { width: 100%; max-width: 380px; text-align: center; }

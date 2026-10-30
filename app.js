@@ -447,7 +447,7 @@ views.routine = () => {
       const arrow = sw.change === 'up' ? icon('up', 13) : sw.change === 'down' ? icon('down', 13) : '';
       return `<div class="card click excard" data-act="exercise" data-id="${ex.id}">
         <div class="thumb sm">${exerciseThumb(ex)}</div>
-        <div class="grow"><h3>${esc(ex.name)}</h3><div class="muted small">${itemText(it)}${it.rest && !it.circuit && !it.autoStart && !it.emom && !it.ladder && !it.amrap ? ` · ${it.rest} s pausa` : ''}</div>
+        <div class="grow"><h3>${esc(ex.name)}${it.prog ? ` <span class="tag prog">${icon('up', 12)} ${it.baseReps ? `+${it.reps - it.baseReps} reps` : `+${it.secs - it.baseSecs} s`}${it.extraSet ? ' · +1 serie' : ''}</span>` : ''}</h3><div class="muted small">${itemText(it)}${it.rest && !it.circuit && !it.autoStart && !it.emom && !it.ladder && !it.amrap ? ` · ${it.rest} s pausa` : ''}</div>
           ${sw.reason ? `<div class="small reason ${sw.change}">${esc(sw.reason)}</div>` : ''}</div>
         ${sw.weight ? `<span class="wtag ${sw.change}">${arrow}${sw.weight} kg${ex.double ? ' ×2' : ''}</span>` : ''}</div>`;
     }).join('')}
@@ -505,6 +505,7 @@ views.exercise = () => {
     <p>${esc(e.desc)}</p>
     <div class="card"><div class="muted small">Músculos</div><div class="chips">${muscleChips(e.muscles)}</div>
       ${sw.weight ? `<div class="kv"><span>Peso sugerido para ti</span><strong>${sw.weight} kg${e.double ? ' ×2' : ''}</strong></div><div class="muted small">${esc(sw.reason || '')}</div>` : ''}</div>
+    ${progressionCard(e)}
     <h2>Cómo hacerlo</h2>
     <div class="card steps">${e.cues.map((c, i) => `<div class="list-item"><span class="num">${i + 1}</span><span class="grow">${esc(c)}</span></div>`).join('')}</div>
     ${e.mistakes?.length ? `<h2>Errores comunes</h2><div class="card">${e.mistakes.map(m => `<div class="list-item"><span class="bad">${icon('close', 14)}</span><span class="grow">${esc(m)}</span></div>`).join('')}</div>` : ''}
@@ -521,6 +522,20 @@ views.exercise = () => {
       <div class="card">${all.slice(-6).reverse().map(x => `<div class="list-item"><div class="grow muted">${x.weight ? x.weight + ' kg' : 'Sin peso'}</div><div>${x.secs ? x.secs + ' s' : x.reps + ' reps'}${x.side ? ' /lado' : ''}</div></div>`).join('')}</div>`
       : '<p class="muted">Todavía no lo registraste. Aparecerá aquí cuando lo hagas.</p>'}`;
 };
+
+// Escalones de progresión del ejercicio: 3 de reps por pesa, y después la pesa siguiente.
+function progressionCard(e) {
+  if (e.type === 'Estiramiento') return '';
+  const p = progression(e.id);
+  if (!p.sessions) return `<div class="card prog-card"><strong>${icon('up', 16, 'accent')} Progresión</strong>
+    <div class="muted small">Cada 2 semanas, si completas todo con margen, suma repeticiones; después de 3 aumentos, sube de pesa.</div></div>`;
+  const total = e.load === 'none' || !bellsFor(e).some(b => b > p.weight) ? PROG.maxSteps : PROG.stepsPerBell;
+  return `<div class="card prog-card">
+    <div class="row between"><strong>${icon('up', 16, 'accent')} Tu progresión</strong>${p.weight ? `<span class="tag">${p.weight} kg</span>` : ''}</div>
+    <div class="steps-bar">${Array.from({ length: total }, (_, i) => `<i class="${i < p.steps ? 'on' : ''}"></i>`).join('')}${total === PROG.stepsPerBell ? `<b class="${p.pendingUp ? 'on' : ''}">${icon('kb', 14)}</b>` : ''}</div>
+    <div class="small">${p.pendingUp ? `<strong class="accent">¡Rango completo! Próxima sesión con ${p.nextWeight} kg.</strong>` : `Escalón ${p.steps} de ${total}${p.steps ? ` · +${p.steps} aumento${p.steps > 1 ? 's' : ''} de reps` : ''}`}</div>
+    <div class="muted small">${esc(progressionText(e.id))}</div></div>`;
+}
 
 // ---------- Creador de rutinas ----------
 
@@ -1576,6 +1591,8 @@ const actions = {
 
   effort: el => { route.params.effort = Number(el.dataset.id); render(); },
   'save-session': () => {
+    const exIds = [...new Set(run.sets.map(s => s.ex))];
+    const before = Object.fromEntries(exIds.map(id => [id, { ...progression(id) }]));
     db.sessions.push({
       id: uid(), date: new Date(run.start).toISOString(), name: run.name, routineId: run.routineId || null,
       duration: Math.round((run.end - run.start) / 1000), sets: run.sets, effort: route.params.effort,
@@ -1584,7 +1601,16 @@ const actions = {
       ...(run.checkin ? { checkin: run.checkin } : {}), ...(run.mode === 'amrap' ? { rounds: run.rounds } : {}),
     });
     db.sessions.sort((a, b) => new Date(a.date) - new Date(b.date));
-    saveDb(); run = null; toast('Guardado en tu historial');
+    saveDb(); run = null;
+    // ¿Esta sesión hizo subir algún escalón de progresión?
+    const ups = exIds.map(id => {
+      const a = before[id], b = progression(id);
+      if (b.pendingUp && !a.pendingUp) return `${exById(id).name}: la próxima vez con ${b.nextWeight} kg`;
+      if (b.steps > a.steps) return `${exById(id).name}: más repeticiones la próxima vez`;
+      return null;
+    }).filter(Boolean);
+    toast(ups.length ? `📈 ${ups[0]}${ups.length > 1 ? ` (y ${ups.length - 1} más)` : ''}` : 'Guardado en tu historial');
+    if (ups.length) Voice.say(`¡Progresaste! ${ups[0]}.`);
     ui.prog = 'resumen'; tab('progress');
   },
   'discard-session': () => { if (confirm('¿Descartar esta sesión?')) { run = null; tab('home'); } },

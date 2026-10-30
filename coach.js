@@ -124,14 +124,17 @@ function adaptRoutine(r) {
   // Los descansos en 0 (ejercicios encadenados de un circuito) se respetan.
   const fixed = REST_MODES[p.rest]?.secs;
   const scaleRest = s => s && fixed ? fixed : s;
+  let progressed = 0;
   const adj = (it, inCircuit) => {
-    const out = { ...it };
+    let out = { ...it };
     const ex = r.custom ? exById(it.ex) : swap(it.ex);
     if (ex.id !== it.ex) {
       notes.push(`${exById(it.ex).name} → ${ex.name}`);
       out.ex = ex.id;
       out.side = !!ex.uni;
     }
+    out = progressItem(out);
+    if (out.prog) progressed++;
     if (!inCircuit && !r.custom && !it.autoStart) {
       if (L === 1 && out.sets >= 3) out.sets -= 1;
       if (L === 3 && out.sets >= 3 && out.sets < 8) out.sets += 1;
@@ -147,6 +150,8 @@ function adaptRoutine(r) {
     if (b.circuit) return { ...b, rounds: r.custom ? b.rounds : Math.max(2, b.rounds + (L === 1 ? -1 : L === 3 ? 1 : 0)), restRound: scaleRest((b.restRound ?? 60) + (r.custom ? 0 : Math.max(0, restBonus))), circuit: b.circuit.map(it => adj(it, true)) };
     return adj(b, false);
   });
+
+  if (progressed) notes.unshift(`Progresión: más repeticiones en ${progressed === 1 ? '1 ejercicio' : `${progressed} ejercicios`}`);
 
   // Programa de 8 semanas: más o menos volumen según la semana.
   const wk = programWeek();
@@ -401,6 +406,73 @@ function hitTarget(sets) {
   return sets.every(s => s.secs ? s.secs >= (s.targetSecs || 0) : !s.target || (s.reps || 0) >= s.target);
 }
 
+// ---------- Progresión doble: primero repeticiones, después peso ----------
+// Cada ~2 semanas, si en al menos 2 sesiones completaste todo con margen (esfuerzo ≤ 7),
+// sube un "escalón": más reps (o +5 s en ejercicios por tiempo). Tras 3 escalones con la
+// misma pesa, toca la pesa siguiente y las reps vuelven a la base. Sin pesa más pesada
+// (o sin pesa), se sigue sumando reps hasta 6 escalones.
+
+const PROG = { stepDays: 13, sessionsPerStep: 2, stepsPerBell: 3, maxSteps: 6 };
+const repInc = base => Math.max(1, Math.round(base * 0.15));
+
+let progCache = { key: '', map: {} };
+function progression(exId) {
+  const key = `${db.sessions.length}:${db.sessions[db.sessions.length - 1]?.id}:${db.bells.map(b => b.weight + 'x' + b.qty).join()}`;
+  if (progCache.key !== key) progCache = { key, map: {} };
+  if (progCache.map[exId]) return progCache.map[exId];
+
+  const ex = exById(exId), list = ex.load === 'none' ? [] : bellsFor(ex);
+  const st = { steps: 0, weight: null, pendingUp: false, nextWeight: null, good: 0, lastStep: null, sessions: 0 };
+  exHistory(exId).forEach(h => {
+    const t = new Date(h.date).getTime();
+    const hw = Math.max(...h.sets.map(s => s.weight || 0));
+    st.sessions++;
+    if (st.weight === null) { st.weight = hw; st.lastStep = t; }
+    if (hw > st.weight) { Object.assign(st, { weight: hw, steps: 0, good: 0, lastStep: t, pendingUp: false }); return; }
+    if (hw < st.weight) { st.weight = hw; st.pendingUp = false; return; } // bajó de pesa: conserva las reps ganadas
+    const ok = hitTarget(h.sets) && (h.effort || 7) <= 7;
+    if (!ok) { if ((h.effort || 0) >= 9) st.good = 0; return; }
+    st.good++;
+    if (st.good >= PROG.sessionsPerStep && t - st.lastStep >= PROG.stepDays * DAY && !st.pendingUp) {
+      const heavier = list.find(b => b > st.weight);
+      if (st.steps >= PROG.stepsPerBell && heavier) { st.pendingUp = true; st.nextWeight = heavier; }
+      else if (st.steps < PROG.maxSteps) st.steps++;
+      st.lastStep = t; st.good = 0;
+    }
+  });
+  // Escalones que se aplican a la próxima sesión (si toca subir de pesa, las reps vuelven a la base).
+  st.active = st.pendingUp ? 0 : st.steps;
+  st.nextIn = st.lastStep ? Math.max(0, Math.ceil((st.lastStep + PROG.stepDays * DAY - Date.now()) / DAY)) : PROG.stepDays;
+  st.goodNeeded = Math.max(0, PROG.sessionsPerStep - st.good);
+  st.maxed = st.steps >= PROG.maxSteps || (st.steps >= PROG.stepsPerBell && !list.some(b => b > st.weight) && st.steps >= PROG.maxSteps);
+  return (progCache.map[exId] = st);
+}
+
+// Aplica los escalones ganados a una serie: más reps, o más segundos si es por tiempo.
+// Con pocas pesas (sin una más pesada) desde el 5.º escalón también suma una serie.
+function progressItem(it) {
+  if (!it.ex || it.autoStart || it.noLog) return it;
+  const p = progression(it.ex);
+  if (!p.active) return it;
+  const extraSet = p.active > PROG.stepsPerBell + 1 && it.sets && !it.emom ? 1 : 0;
+  const base = { ...it, prog: p.active, ...(extraSet ? { sets: it.sets + 1, extraSet } : {}) };
+  if (it.reps) return { ...base, reps: it.reps + p.active * repInc(it.reps), baseReps: it.reps };
+  if (it.secs) return { ...base, secs: it.secs + p.active * 5, baseSecs: it.secs };
+  return it;
+}
+
+// Texto corto de qué viene en la progresión de un ejercicio.
+function progressionText(exId) {
+  const p = progression(exId);
+  if (!p.sessions) return '';
+  if (p.pendingUp) return `Completaste el rango: toca subir a ${p.nextWeight} kg`;
+  if (p.steps >= PROG.maxSteps) return 'Llegaste al máximo de repeticiones: suma una pesa más pesada para seguir';
+  const sessions = n => `${n} sesión${n > 1 ? 'es' : ''}`;
+  if (p.nextIn === 0 && p.goodNeeded <= 1) return 'Si completas todo en la próxima sesión, suben las repeticiones';
+  if (p.nextIn === 0) return `Completa ${sessions(p.goodNeeded)} con margen y suben las repeticiones`;
+  return `Próximo aumento en ~${p.nextIn} día${p.nextIn > 1 ? 's' : ''}${p.goodNeeded ? `, si completas ${sessions(p.goodNeeded)} con margen` : ''}`;
+}
+
 function suggestWeight(ex) {
   if (ex.load === 'none') return { weight: 0, change: 'none' };
   const list = bellsFor(ex);
@@ -409,32 +481,22 @@ function suggestWeight(ex) {
   if (!hist.length) {
     return { weight: snapBell(baseSwingKg() * (LOAD_RATIO[ex.load] || 1), list), reason: 'Sugerido según tu perfil', change: 'new' };
   }
+  const p = progression(ex.id);
   const last = hist[hist.length - 1];
-  const w = Math.max(...last.sets.map(s => s.weight || 0));
+  const w = p.weight ?? Math.max(...last.sets.map(s => s.weight || 0));
   const atW = last.sets.filter(s => (s.weight || 0) === w);
-  const hit = hitTarget(atW);
-  const bad = atW.some(s => s.target && (s.reps || 0) < s.target * 0.7);
-  const effort = last.effort || 7;
+  const bad = !hitTarget(atW) && (atW.some(s => s.target && (s.reps || 0) < s.target * 0.7) || (last.effort || 7) >= 9);
   let idx = list.indexOf(w);
   if (idx < 0) idx = list.indexOf(snapBell(w, list));
 
-  let streak = 0;
-  for (let i = hist.length - 1; i >= 0; i--) {
-    const h = hist[i], hw = Math.max(...h.sets.map(s => s.weight || 0));
-    if (hw === w && hitTarget(h.sets.filter(s => (s.weight || 0) === w))) streak++; else break;
+  if (p.pendingUp && p.nextWeight) {
+    return { weight: p.nextWeight, reason: `Subes de ${w} a ${p.nextWeight} kg: completaste el rango de repeticiones`, change: 'up' };
   }
-  const needed = level() === 1 ? 2 : 1;
-
-  if (hit && effort <= 7 && streak >= needed && idx < list.length - 1) {
-    return { weight: list[idx + 1], reason: `Subes de ${w} a ${list[idx + 1]} kg: completaste todo con margen`, change: 'up' };
-  }
-  if (!hit && (bad || effort >= 9) && idx > 0) {
+  if (bad && idx > 0 && p.steps === 0) {
     return { weight: list[idx - 1], reason: 'Bajamos un poco: la última vez costó demasiado', change: 'down' };
   }
-  const reason = !hit ? 'Mismo peso: completa todas las reps para subir'
-    : effort > 7 ? 'Mismo peso: la última vez fue exigente'
-    : streak < needed ? 'Repite este peso una vez más y subimos' : 'Ya usas tu pesa más pesada';
-  return { weight: list[idx], reason, change: 'same' };
+  const reps = p.active ? `Reps +${p.active} escalón${p.active > 1 ? 'es' : ''} · ` : '';
+  return { weight: list[idx], reason: reps + (bad ? 'La última vez costó: mismo peso y reps' : progressionText(ex.id)), change: p.active ? 'prog' : 'same' };
 }
 
 // ---------- Programa y plan del día ----------
