@@ -92,6 +92,9 @@ function setRing(id, pct) {
   el.setAttribute('stroke-dashoffset', (c * (1 - Math.min(1, Math.max(0, pct)))).toFixed(1));
 }
 
+const restSeg = () => `<div class="seg">${Object.entries(REST_MODES).map(([k, m]) =>
+  `<button class="${(REST_MODES[db.profile.rest] ? db.profile.rest : 'auto') === k ? 'on' : ''}" data-act="rest-mode" data-id="${k}">${m.name}</button>`).join('')}</div>`;
+
 const levelDots = n => `<span class="lvl" title="${LEVELS[n]?.name || ''}">${[1, 2, 3].map(i => `<i class="${i <= n ? 'on' : ''}"></i>`).join('')}</span>`;
 const muscleChips = list => list.map(m => `<span class="tag">${MUSCLES[m] || m}</span>`).join('');
 
@@ -298,11 +301,11 @@ views.home = () => {
     </div>
     <h2>Para ti</h2>
     <div class="card">${ins.map(i => `<div class="insight">${icon(i.icon, 18, 'accent')}<span class="grow">${esc(i.text)}</span>${i.action ? `<button class="btn small" data-act="${i.action}">Sí</button>` : ''}</div>`).join('')}</div>
-    <h2>Recuperación muscular</h2>
+    <h2>Músculos listos para entrenar</h2>
     <div class="card recovery">${shown.map(m => {
-      const v = rec[m];
-      return `<div class="rec"><span>${MUSCLES[m]}</span><div class="bar"><i class="${v < 50 ? 'low' : v < 85 ? 'mid' : ''}" style="width:${v}%"></i></div><small>${v}%</small></div>`;
-    }).join('')}<p class="muted small" style="margin:8px 0 0">Calculado según lo que entrenaste y el esfuerzo de cada sesión.</p></div>
+      const v = rec[m], st = v >= 85 ? ['', 'Listo'] : v >= 50 ? ['mid', 'Recuperando'] : ['low', 'Cansado'];
+      return `<div class="rec"><span>${MUSCLES[m]}</span><div class="bar"><i class="${st[0]}" style="width:${v}%"></i></div><small class="${st[0] || 'ok'}">${st[1]}</small></div>`;
+    }).join('')}<p class="muted small" style="margin:8px 0 0">Barra llena = descansado. Baja cuando entrenas ese músculo y se vuelve a llenar con las horas de descanso.</p></div>
     <div class="row quick">
       <button class="btn grow" data-act="free-start">${icon('bolt', 18)} Sesión libre</button>
       <button class="btn grow" data-act="body-quick">${icon('scale', 18)} Registrar peso</button>
@@ -359,6 +362,7 @@ views.routine = () => {
     </div>
     ${r.notes.length ? `<div class="note">${icon('spark', 18)}<div><strong>Adaptada a ti</strong>${r.notes.map(n => `<div class="small">${esc(n)}</div>`).join('')}</div></div>` : ''}
     ${hasCircuit ? `<div class="note">${icon('repeat', 18)}<span class="small">Incluye un circuito: haces los ejercicios seguidos y descansas al final de cada ronda.</span></div>` : ''}
+    <div class="card"><div class="row between"><strong>${icon('timer', 18, 'accent')} Descanso entre series</strong><span class="muted small">se aplica a todas las rutinas</span></div>${restSeg()}</div>
     <h2>Ejercicios</h2>
     ${items.map(it => {
       const ex = exById(it.ex), sw = suggestWeight(ex);
@@ -525,7 +529,7 @@ views.run = () => {
     return `${head}
       <div class="center muted" style="margin-top:8px">Descanso</div>
       <div class="center">${ring(left / (run.restTotal / 1000), 220, 12, `<div class="timer" id="timer">${fmtTime(left)}</div><small class="muted">respira</small>`, 'ring-rest')}</div>
-      <div class="row" style="margin-top:14px"><button class="btn grow" data-act="rest-add">${icon('plus', 16)} 15 s</button><button class="btn primary grow" data-act="rest-skip">${icon('skip', 16)} Saltar</button></div>
+      <div class="row" style="margin-top:14px"><button class="btn grow" data-act="rest-sub">${icon('minus', 16)} 15 s</button><button class="btn grow" data-act="rest-add">${icon('plus', 16)} 15 s</button><button class="btn primary grow" data-act="rest-skip">${icon('skip', 16)} Saltar</button></div>
       <h2>Siguiente</h2>
       <div class="card row"><div class="demo sm" data-demo="${nex.id}"></div><div class="grow"><h3>${esc(nex.name)}</h3>
         <div class="muted small">${nx.label} · ${targetText(nx)}</div>${nex.load !== 'none' && bellsFor(nex).length ? `<div class="small">${currentWeight(nex.id)} kg</div>` : ''}</div></div>
@@ -841,6 +845,9 @@ views.profile = () => {
       <div class="seg">${[2, 3, 4, 5, 6].map(n => `<button class="${p.days === n ? 'on' : ''}" data-act="p-set" data-field="days" data-id="${n}">${n}</button>`).join('')}</div>
       <div class="muted small" style="margin-top:12px">Minutos por sesión</div>
       <div class="seg">${[15, 20, 30, 45, 60].map(n => `<button class="${p.minutes === n ? 'on' : ''}" data-act="p-set" data-field="minutes" data-id="${n}">${n}′</button>`).join('')}</div>
+      <div class="muted small" style="margin-top:12px">Descanso entre series</div>
+      ${restSeg()}
+      <div class="muted small">"Recomendado" usa el descanso pensado para cada rutina y tu nivel. Durante el descanso también puedes sumar o restar 15 s.</div>
     </div>
     <h2>Mis pesas rusas</h2>
     <div class="note">${icon('bulb', 18)}<span>Para tu perfil, la pesa ideal de swing es de <strong>${ideal} kg</strong>. Marca "×2" si tienes un par (para ejercicios dobles).</span></div>
@@ -959,6 +966,11 @@ const actions = {
     run.timerEnd = Date.now() + run.timerTotal; render();
   },
   'rest-add': () => { run.restEnd += 15000; run.restTotal += 15000; tick(); },
+  'rest-sub': () => {
+    run.restEnd -= 15000; run.restTotal = Math.max(1000, run.restTotal - 15000);
+    if (run.restEnd <= Date.now() + 500) { run.phase = 'work'; run.restEnd = null; render(); } else tick();
+  },
+  'rest-mode': el => { db.profile.rest = el.dataset.id; touchSettings(); saveDb(); render(); },
   'rest-skip': () => { run.phase = 'work'; run.restEnd = null; render(); },
   'run-quit': () => {
     if (!run.sets.length) { if (confirm('¿Salir sin registrar nada?')) { run = null; releaseWakeLock(); tab('home'); } return; }

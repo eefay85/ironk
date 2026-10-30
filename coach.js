@@ -4,6 +4,13 @@
 
 const DAY = 864e5;
 const LOAD_RATIO = { light: 0.45, medium: 0.65, heavy: 1, max: 1.2 };
+// Descanso entre series: "auto" usa el de cada rutina (adaptado a tu nivel); el resto es un valor fijo.
+const REST_MODES = {
+  auto: { name: 'Recomendado', secs: null },
+  corto: { name: '15 s', secs: 15 },
+  medio: { name: '30 s', secs: 30 },
+  largo: { name: '1 min', secs: 60 },
+};
 
 const exById = id => EXERCISES.find(e => e.id === id) || { id, name: id, group: '', type: '', load: 'medium', level: 1, muscles: [], desc: '', cues: [], mistakes: [] };
 const allRoutines = () => [...PRESET_ROUTINES, ...db.customRoutines];
@@ -91,6 +98,10 @@ function adaptRoutine(r) {
     return ex;
   };
   const restBonus = (L === 1 ? 15 : L === 3 ? -10 : 0) + (p.age >= 50 ? 15 : 0);
+  // Preferencia de descanso del usuario (Perfil o detalle de rutina): se aplica a todas las rutinas.
+  // Los descansos en 0 (ejercicios encadenados de un circuito) se respetan.
+  const fixed = REST_MODES[p.rest]?.secs;
+  const scaleRest = s => s && fixed ? fixed : s;
   const adj = (it, inCircuit) => {
     const out = { ...it };
     const ex = r.custom ? exById(it.ex) : swap(it.ex);
@@ -104,10 +115,11 @@ function adaptRoutine(r) {
       if (L === 3 && out.sets >= 3 && out.sets < 8) out.sets += 1;
     }
     if (out.rest && !r.custom) out.rest = Math.max(inCircuit ? 10 : 20, out.rest + restBonus);
+    out.rest = scaleRest(out.rest);
     return out;
   };
   let blocks = r.blocks.map(b => b.circuit
-    ? { ...b, rounds: r.custom ? b.rounds : Math.max(2, b.rounds + (L === 1 ? -1 : L === 3 ? 1 : 0)), restRound: (b.restRound ?? 60) + Math.max(0, restBonus), circuit: b.circuit.map(it => adj(it, true)) }
+    ? { ...b, rounds: r.custom ? b.rounds : Math.max(2, b.rounds + (L === 1 ? -1 : L === 3 ? 1 : 0)), restRound: scaleRest((b.restRound ?? 60) + (r.custom ? 0 : Math.max(0, restBonus))), circuit: b.circuit.map(it => adj(it, true)) }
     : adj(b, false));
 
   // Recortar para que entre en el tiempo que elegiste.

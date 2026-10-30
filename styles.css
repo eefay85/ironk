@@ -232,8 +232,11 @@ label.field span { display: block; font-size: 13px; color: var(--muted); margin-
 .insight { display: flex; gap: 12px; align-items: center; padding: 9px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
 .insight:last-child { border-bottom: 0; }
 
-.recovery .rec { display: grid; grid-template-columns: 82px 1fr 38px; gap: 10px; align-items: center; padding: 5px 0; font-size: 13.5px; }
-.recovery .rec small { color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; }
+.recovery .rec { display: grid; grid-template-columns: 82px 1fr 92px; gap: 10px; align-items: center; padding: 5px 0; font-size: 13.5px; }
+.recovery .rec small { text-align: right; font-weight: 600; }
+.recovery .rec small.ok { color: var(--ok); }
+.recovery .rec small.mid { color: var(--warn); }
+.recovery .rec small.low { color: var(--danger); }
 .bar { height: 8px; background: var(--surface-3); border-radius: 99px; overflow: hidden; }
 .bar i { display: block; height: 100%; background: var(--ok); border-radius: 99px; }
 .bar i.mid { background: var(--warn); }
