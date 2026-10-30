@@ -28,6 +28,8 @@ function mergeDb(local, remote) {
     .sort((a, b) => time(a.date) - time(b.date));
   const customRoutines = byId(L.customRoutines, R.customRoutines, r => r.updatedAt || 0)
     .filter(r => !gone.has(r.id) && alive(r.updatedAt || 0));
+  const tests = byId(L.tests || [], R.tests || []).filter(t => alive(time(t.date))).sort((a, b) => time(a.date) - time(b.date));
+  const challenges = byId(L.challenges || [], R.challenges || []).filter(c => !resetAt || c.month >= monthKey(resetAt));
 
   const body = new Map();
   [...L.bodyLog, ...R.bodyLog].forEach(b => {
@@ -44,7 +46,7 @@ function mergeDb(local, remote) {
 
   return {
     profile: wiped ? null : src.profile, bells: wiped ? [] : src.bells,
-    customRoutines, sessions, bodyLog, deleted, meta: { settingsAt, resetAt },
+    customRoutines, sessions, bodyLog, tests, challenges, deleted, meta: { settingsAt, resetAt },
   };
 }
 
@@ -110,7 +112,7 @@ window.Sync = {
   rerender() {
     const typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName);
     if (route.name === 'login' && profileComplete()) return tab('home');
-    if (!typing && !['run', 'free', 'summary', 'builder', 'onboarding'].includes(route.name)) render();
+    if (!typing && !['run', 'free', 'amrap', 'test-run', 'summary', 'builder', 'onboarding', 'checkin', 'quick', 'timers'].includes(route.name)) render();
   },
 
   async signIn(email, password) {

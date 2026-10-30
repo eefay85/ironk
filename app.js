@@ -3,7 +3,7 @@
 
 const STORE_KEY = 'ironk-v1';
 // deleted: ids borrados (para que no reaparezcan al sincronizar). meta: marcas de tiempo para combinar.
-const EMPTY_DB = { profile: null, bells: [], customRoutines: [], sessions: [], bodyLog: [], deleted: [], meta: {} };
+const EMPTY_DB = { profile: null, bells: [], customRoutines: [], sessions: [], bodyLog: [], tests: [], challenges: [], deleted: [], meta: {} };
 
 let db = loadDb();
 let route = { name: 'home', params: {} };
@@ -310,6 +310,7 @@ views.home = () => {
   return `
     <header class="home-head"><div><div class="muted small cap">${date}</div><h1>Hola${p.name ? ', ' + esc(p.name) : ''}</h1></div>
       <button class="avatar" data-act="tab" data-id="profile">${esc((p.name || 'K')[0].toUpperCase())}</button></header>
+    ${rankCard()}
     <div class="card goal-card">
       ${ring(week / p.days, 74, 8, `<strong>${week}</strong><small>/${p.days}</small>`)}
       <div class="grow"><strong>Meta semanal</strong><div class="muted small">${week >= p.days ? '¡Cumplida! Gran semana.' : `Te faltan ${p.days - week} sesión${p.days - week > 1 ? 'es' : ''}`}</div>
@@ -319,10 +320,11 @@ views.home = () => {
     <div class="stats three">
       <div class="stat">${icon('flame', 18, 'accent')}<div class="v">${streakDays()}</div><div class="l">días de racha</div></div>
       <div class="stat">${icon('kb', 18, 'accent')}<div class="v">${db.sessions.length}</div><div class="l">sesiones</div></div>
-      <div class="stat">${icon('scale', 18, 'accent')}<div class="v">${fmtKg(db.sessions.reduce((a, s) => a + sessionVolume(s), 0))}</div><div class="l">levantado</div></div>
+      <div class="stat">${icon('heart', 18, 'accent')}<div class="v">${db.sessions.reduce((a, s) => a + sessionKcal(s), 0).toLocaleString('es-AR')}</div><div class="l">kcal quemadas</div></div>
     </div>
+    ${challengeCards(true)}
     <h2>Para ti</h2>
-    <div class="card">${ins.map(i => `<div class="insight">${icon(i.icon, 18, 'accent')}<span class="grow">${esc(i.text)}</span>${i.action ? `<button class="btn small" data-act="${i.action}">Sí</button>` : ''}</div>`).join('')}</div>
+    <div class="card">${ins.map(insightRow).join('')}</div>
     <h2>Músculos listos para entrenar</h2>
     <div class="card recovery">${shown.map(m => {
       const v = rec[m], st = v >= 85 ? ['', 'Listo'] : v >= 50 ? ['mid', 'Recuperando'] : ['low', 'Cansado'];
@@ -336,6 +338,34 @@ views.home = () => {
     ${tabbar()}`;
 };
 
+const insightRow = i => `<div class="insight">${icon(i.icon, 18, 'accent')}<span class="grow">${esc(i.text)}</span>${i.action ? `<button class="btn small" data-act="${i.action}">${i.label || 'Sí'}</button>` : ''}</div>`;
+
+// Rango y puntos (XP).
+function rankCard() {
+  const r = rankInfo();
+  return `<div class="card rank-card click" data-act="go-logros">
+    <div class="rank-badge r${r.idx}">${icon('medal', 22)}</div>
+    <div class="grow"><div class="row between"><strong>${r.rank}</strong><span class="muted small">${r.xp.toLocaleString('es-AR')} XP</span></div>
+      <div class="bar"><i style="width:${Math.round(r.pct * 100)}%"></i></div>
+      <div class="muted small">${r.next ? `${r.toNext.toLocaleString('es-AR')} XP para ${r.next}` : '¡Rango máximo!'}</div></div></div>`;
+}
+
+// Desafíos del mes (compact: sólo los que estás haciendo, para Inicio).
+function challengeCards(compact = false) {
+  const key = monthKey(), joined = joinedChallenges(key);
+  const monthName = new Date().toLocaleDateString('es-AR', { month: 'long' });
+  const card = ch => {
+    const v = challengeProgress(ch, key), done = v >= ch.target, isIn = joined.includes(ch);
+    return `<div class="card challenge ${done ? 'done' : ''}">
+      <div class="row"><span class="opt-ico">${icon(done ? 'check' : ch.icon, 20)}</span>
+        <div class="grow"><strong>${ch.name}</strong><div class="muted small">${isIn ? `${v.toLocaleString('es-AR')} / ${ch.target.toLocaleString('es-AR')} ${ch.unit}` : `en ${monthName}`}</div></div>
+        ${isIn ? (done ? '<span class="tag accent">¡Cumplido!</span>' : `<strong class="accent">${Math.floor(Math.min(1, v / ch.target) * 100)}%</strong>`) : `<button class="btn small" data-act="ch-join" data-id="${ch.id}">Unirme</button>`}</div>
+      ${isIn ? `<div class="bar" style="margin-top:10px"><i style="width:${Math.min(100, (v / ch.target) * 100)}%"></i></div>` : ''}</div>`;
+  };
+  if (compact) return joined.length ? `<h2>${icon('target', 18, 'accent')} Desafíos de ${monthName}</h2>${joined.map(card).join('')}` : '';
+  return CHALLENGES.map(card).join('');
+}
+
 // ---------- Entrenar ----------
 
 function routineCard(r, badge = '') {
@@ -343,9 +373,26 @@ function routineCard(r, badge = '') {
   return `<div class="card click rcard ${fits ? '' : 'dim'}" data-act="routine" data-id="${r.id}">
     <div class="thumb">${exerciseThumb(exById(items[0]?.ex))}</div>
     <div class="grow"><div class="row"><h3 class="grow">${esc(r.name)}</h3>${badge}</div>
-      <div class="muted small">${r.custom ? 'Mi rutina' : esc(GOALS[r.goal])} · ~${estimateMin(a)} min · ${items.length} ejercicios</div>
-      <div class="meta">${r.custom ? '' : levelDots(r.minLevel || 1)}${fits ? '' : '<span class="tag">No es tu nivel</span>'}</div></div>
+      <div class="muted small">${r.custom ? 'Mi rutina' : esc(GOALS[r.goal])} · ~${estimateMin(a)} min · ${new Set(items.map(i => i.ex)).size} ejercicios</div>
+      <div class="meta">${r.custom ? '' : levelDots(r.minLevel || 1)}${r.format ? `<span class="tag accent">${r.format}</span>` : ''}${fits ? '' : '<span class="tag">No es tu nivel</span>'}</div></div>
     <span class="muted">${icon('right', 18)}</span></div>`;
+}
+
+function programCard() {
+  const wk = programWeek();
+  if (!wk) return `<div class="card program">
+    <div class="row"><span class="opt-ico">${icon('calendar', 22)}</span><div class="grow"><strong>Programa de 8 semanas</strong>
+      <div class="muted small">Volumen que sube semana a semana, descargas para recuperar y tests en las semanas 4 y 8.</div></div></div>
+    <button class="btn primary block" style="margin-top:12px" data-act="prog-start">Empezar programa</button></div>`;
+  if (wk.done) return `<div class="card program done">
+    <div class="row"><span class="opt-ico">${icon('trophy', 22)}</span><div class="grow"><strong>¡Programa de 8 semanas completado!</strong>
+      <div class="muted small">Compara tus tests para ver cuánto mejoraste.</div></div></div>
+    <div class="row" style="margin-top:12px"><button class="btn grow" data-act="go-tests">Ver tests</button><button class="btn primary grow" data-act="prog-start">Empezar otro</button></div></div>`;
+  return `<div class="card program">
+    <div class="row between"><strong>${icon('calendar', 18, 'accent')} Semana ${wk.n} de 8</strong><span class="tag accent">${wk.name}</span></div>
+    <div class="weeks">${PROGRAM_WEEKS.map((w, i) => `<i class="${i < wk.n - 1 ? 'past' : i === wk.n - 1 ? 'cur' : ''} ${w.test ? 'test' : ''}"></i>`).join('')}</div>
+    <div class="muted small">${wk.test ? 'Semana liviana: aprovecha para hacer tus tests.' : wk.vol > 1 ? `Volumen +${Math.round((wk.vol - 1) * 100)}% respecto de tu rutina base.` : 'Semana para afianzar la técnica.'}</div>
+    <div class="row" style="margin-top:10px">${wk.test ? `<button class="btn primary grow" data-act="go-tests">${icon('target', 16)} Hacer tests</button>` : ''}<button class="btn small" data-act="prog-stop">Dejar programa</button></div></div>`;
 }
 
 views.train = () => {
@@ -354,6 +401,12 @@ views.train = () => {
     .sort((a, b) => Number(routineFits(b)) - Number(routineFits(a)));
   return `
     <h1>Entrenar</h1>
+    <div class="quick-grid">
+      <button class="qbtn" data-act="go-quick">${icon('bolt', 22)}<strong>Rápido</strong><small>A tu medida</small></button>
+      <button class="qbtn" data-act="go-timers">${icon('timer', 22)}<strong>Timers</strong><small>EMOM · Tabata · AMRAP</small></button>
+      <button class="qbtn" data-act="go-tests">${icon('target', 22)}<strong>Tests</strong><small>Mide tu progreso</small></button>
+    </div>
+    ${programCard()}
     <h2>${icon('repeat', 18, 'accent')} Tu programa</h2>
     <p class="muted small">${goalsText()} · ${LEVELS[level()].name} · ${db.profile.days} días por semana</p>
     ${goalsOf().length > 1 ? `<div class="note">${icon('repeat', 18)}<span class="small">Cada rutina se mantiene completa y con su propia lógica; lo que se combina es el orden: se alternan rutinas de tus objetivos y se evita repetir músculos que todavía se recuperan.</span></div>` : ''}
@@ -374,15 +427,16 @@ views.train = () => {
 views.routine = () => {
   const base = routineById(route.params.id);
   if (!base) return topbar('Rutina') + '<p class="empty">Rutina no encontrada.</p>';
-  const r = adaptRoutine(base), items = routineItems(r), hasCircuit = r.blocks.some(b => b.circuit);
+  const r = adaptRoutine(base), items = routineItems(r), hasCircuit = r.blocks.some(b => b.circuit && b.rounds);
   return `
     ${topbar(r.name)}
     <div class="card hero-lite">
       <div class="demo-wrap"><div class="demo" data-demo="${items[0].ex}"></div></div>
       <p>${esc(r.desc || '')}</p>
       <div class="chips"><span class="tag accent">${r.custom ? 'Mi rutina' : esc(GOALS[r.goal])}</span><span class="tag">${icon('clock', 13)} ~${estimateMin(r)} min</span>
-        <span class="tag">${items.length} ejercicios</span>${mainMuscles(r).map(m => `<span class="tag">${MUSCLES[m]}</span>`).join('')}</div>
+        ${r.format ? `<span class="tag accent">${r.format}</span>` : ''}${mainMuscles(r).map(m => `<span class="tag">${MUSCLES[m]}</span>`).join('')}</div>
     </div>
+    ${db.profile.warmup !== false && !isAmrap(r) ? `<div class="note">${icon('flame', 18)}<span class="small">Incluye 2 min de calentamiento al inicio y estiramientos al final (puedes desactivarlo en Perfil).</span></div>` : ''}
     ${r.notes.length ? `<div class="note">${icon('spark', 18)}<div><strong>Adaptada a ti</strong>${r.notes.map(n => `<div class="small">${esc(n)}</div>`).join('')}</div></div>` : ''}
     ${hasCircuit ? `<div class="note">${icon('repeat', 18)}<span class="small">Incluye un circuito: haces los ejercicios seguidos y descansas al final de cada ronda.</span></div>` : ''}
     <div class="card"><div class="row between"><strong>${icon('timer', 18, 'accent')} Descanso entre series</strong><span class="muted small">se aplica a todas las rutinas</span></div>${restSeg()}</div>
@@ -392,7 +446,7 @@ views.routine = () => {
       const arrow = sw.change === 'up' ? icon('up', 13) : sw.change === 'down' ? icon('down', 13) : '';
       return `<div class="card click excard" data-act="exercise" data-id="${ex.id}">
         <div class="thumb sm">${exerciseThumb(ex)}</div>
-        <div class="grow"><h3>${esc(ex.name)}</h3><div class="muted small">${it.sets} × ${targetText(it)}${it.rest && !it.circuit ? ` · ${it.rest} s pausa` : ''}</div>
+        <div class="grow"><h3>${esc(ex.name)}</h3><div class="muted small">${itemText(it)}${it.rest && !it.circuit && !it.autoStart && !it.emom && !it.ladder && !it.amrap ? ` · ${it.rest} s pausa` : ''}</div>
           ${sw.reason ? `<div class="small reason ${sw.change}">${esc(sw.reason)}</div>` : ''}</div>
         ${sw.weight ? `<span class="wtag ${sw.change}">${arrow}${sw.weight} kg${ex.double ? ' ×2' : ''}</span>` : ''}</div>`;
     }).join('')}
@@ -505,23 +559,76 @@ views.builder = () => {
 
 // ---------- Sesión guiada ----------
 
-function startRun(base) {
-  const routine = adaptRoutine(base);
-  const steps = buildSteps(routine);
-  if (!steps.length) return toast('La rutina no tiene ejercicios');
-  run = {
-    mode: 'guided', routineId: base.id, name: routine.name, steps,
-    i: 0, phase: 'work', start: Date.now(), sets: [], weights: {}, reasons: {}, reps: steps[0].reps,
-    timerEnd: null, timerTotal: 0, restEnd: null, restTotal: 0,
+// Antes de empezar: "¿Cómo te sientes hoy?" (se puede saltar).
+function askCheckin(base) {
+  go('checkin', { id: base.id, routine: base.quick ? base : null, c: { energy: 'normal', sleep: 'bien', pains: [] } });
+}
+
+views.checkin = () => {
+  const c = route.params.c;
+  const opt = (field, val, label) => `<button class="${c[field] === val ? 'on' : ''}" data-act="ck-set" data-field="${field}" data-id="${val}">${label}</button>`;
+  return `${topbar('Antes de empezar')}
+    <h1>¿Cómo te sientes hoy?</h1><p class="muted">Ajustamos la sesión a cómo llegas.</p>
+    <div class="card">
+      <div class="muted small">Energía</div><div class="seg">${opt('energy', 'baja', 'Baja')}${opt('energy', 'normal', 'Normal')}${opt('energy', 'alta', 'Alta')}</div>
+      <div class="muted small" style="margin-top:12px">¿Cómo dormiste?</div><div class="seg">${opt('sleep', 'mal', 'Mal')}${opt('sleep', 'regular', 'Regular')}${opt('sleep', 'bien', 'Bien')}</div>
+      <div class="muted small" style="margin-top:12px">¿Alguna molestia?</div>
+      <div class="chips">${Object.entries(PAINS).map(([k, v]) => `<button class="chip ${c.pains.includes(k) ? 'on' : ''}" data-act="ck-pain" data-id="${k}">${v}</button>`).join('')}</div>
+    </div>
+    <button class="btn primary block big" data-act="ck-go">${icon('play', 18)} Empezar</button>
+    <button class="btn block" style="margin-top:8px" data-act="ck-skip">Saltar y empezar igual</button>`;
+};
+
+function startRun(base, checkin = null) {
+  let routine = adaptRoutine(base);
+  const ck = applyCheckin(routine, checkin);
+  routine = ck.routine;
+  const common = {
+    routineId: base.quick ? null : base.id, name: routine.name, start: Date.now(), sets: [], weights: {}, reasons: {},
+    checkin, weightDown: ck.weightDown, bell: base.bell || null,
   };
+  if (isAmrap(routine)) return startAmrap(routine, common, ck.notes);
+  let steps = buildSteps(routine);
+  if (!steps.length) return toast('La rutina no tiene ejercicios');
+  steps = withWarmupCooldown(steps, routine);
+  run = { ...common, mode: 'guided', steps, i: 0, phase: 'work', reps: steps[0].reps, timerEnd: null, timerTotal: 0, restEnd: null, restTotal: 0 };
   requestWakeLock();
   route = { name: 'run', params: {} }; stack = [];
+  if (ck.notes.length) toast(ck.notes[0]);
+  enterWork();
+}
+
+// Arranca la serie actual: timers automáticos (Tabata, calentamiento), ventana de EMOM y voz.
+function enterWork() {
+  const s = run.steps[run.i], ex = exById(s.ex);
+  Object.assign(run, { phase: 'work', restEnd: null, timerEnd: null, reps: s.reps, halfSaid: false, windowEnd: s.emom ? Date.now() + s.emom * 1000 : null });
+  if (s.secs && s.autoStart) { run.timerTotal = s.secs * 1000 * (s.side ? 2 : 1); run.timerEnd = Date.now() + run.timerTotal; }
+  announce(s, ex);
   render();
+}
+
+function announce(s, ex) {
+  const prev = run.steps[run.i - 1];
+  const [n, m] = (s.label.match(/(\d+)\/(\d+)/) || []).slice(1).map(Number);
+  const parts = [];
+  if (s.phase === 'warmup' && run.i === 0) parts.push('Empezamos con el calentamiento.');
+  if (s.phase === 'cooldown' && prev?.phase !== 'cooldown') parts.push('¡Buen trabajo! Ahora estiramos.');
+  if (!s.phase && prev?.phase === 'warmup') parts.push('¡A entrenar!');
+  if (s.emom) parts.push(`Minuto ${run.steps.slice(0, run.i + 1).filter(x => x.emom).length}.`);
+  else if (s.label.startsWith('Ronda') && n === m && m > 1 && prev?.label !== s.label) parts.push('Última ronda.');
+  else if (s.label.startsWith('Serie') && n === m && m > 1) parts.push('Último set.');
+  parts.push(`${ex.name}. ${spokenTarget(s)}.`);
+  const w = ex.load !== 'none' && !s.noLog && bellsFor(ex).length ? currentWeight(ex.id) : 0;
+  if (w) parts.push(`${w} kilos${ex.double ? ' cada una' : ''}.`);
+  Voice.say(parts.join(' '), true);
 }
 
 function currentWeight(exId) {
   if (!(exId in run.weights)) {
-    const sw = suggestWeight(exById(exId));
+    const ex = exById(exId), list = bellsFor(ex);
+    let sw = suggestWeight(ex);
+    if (run.bell && list.includes(run.bell)) sw = { weight: run.bell, reason: 'La pesa que elegiste', change: 'same' };
+    else if (run.weightDown && list.indexOf(sw.weight) > 0) sw = { weight: list[list.indexOf(sw.weight) - 1], reason: 'Una pesa más liviana por hoy', change: 'down' };
     run.weights[exId] = sw.weight;
     run.reasons[exId] = sw;
   }
@@ -537,25 +644,32 @@ function weightChips(ex) {
     ${sw.reason ? `<div class="small center reason ${sw.change}">${esc(sw.reason)}</div>` : ''}`;
 }
 
+function runHead(pct) {
+  return `<div class="topbar"><button class="icon-btn" data-act="run-quit" aria-label="Terminar">${icon('close')}</button>
+    <div class="title">${esc(run.name)}</div>
+    <button class="icon-btn" data-act="voice-toggle" aria-label="Voz del coach">${icon(Voice.on() ? 'volume' : 'mute', 18)}</button>
+    <span class="pill dark" id="elapsed">${fmtTime((Date.now() - run.start) / 1000)}</span></div>
+    <div class="progress"><i style="width:${pct}%"></i></div>`;
+}
+
 views.run = () => {
   const s = run.steps[run.i], ex = exById(s.ex);
   const pct = (run.i / run.steps.length) * 100;
   const next = run.steps[run.i + 1];
-  const head = `<div class="topbar"><button class="icon-btn" data-act="run-quit" aria-label="Terminar">${icon('close')}</button>
-    <div class="title">${esc(run.name)}</div><span class="pill dark" id="elapsed">${fmtTime((Date.now() - run.start) / 1000)}</span></div>
-    <div class="progress"><i style="width:${pct}%"></i></div>`;
+  const head = runHead(pct);
 
   if (run.phase === 'rest') {
     const nx = run.steps[run.i], nex = exById(nx.ex);
     const left = (run.restEnd - Date.now()) / 1000;
     const tip = nex.cues[Math.floor(Math.random() * nex.cues.length)];
+    const prevStep = run.steps[run.i - 1];
     return `${head}
-      <div class="center muted" style="margin-top:8px">Descanso</div>
+      <div class="center muted" style="margin-top:8px">${prevStep?.emom ? 'Descansa hasta el próximo minuto' : 'Descanso'}</div>
       <div class="center">${ring(left / (run.restTotal / 1000), 220, 12, `<div class="timer" id="timer">${fmtTime(left)}</div><small class="muted">respira</small>`, 'ring-rest')}</div>
       <div class="row" style="margin-top:14px"><button class="btn grow" data-act="rest-sub">${icon('minus', 16)} 15 s</button><button class="btn grow" data-act="rest-add">${icon('plus', 16)} 15 s</button><button class="btn primary grow" data-act="rest-skip">${icon('skip', 16)} Saltar</button></div>
       <h2>Siguiente</h2>
       <div class="card row"><div class="demo sm" data-demo="${nex.id}"></div><div class="grow"><h3>${esc(nex.name)}</h3>
-        <div class="muted small">${nx.label} · ${targetText(nx)}</div>${nex.load !== 'none' && bellsFor(nex).length ? `<div class="small">${currentWeight(nex.id)} kg</div>` : ''}</div></div>
+        <div class="muted small">${nx.label} · ${targetText(nx)}</div>${nex.load !== 'none' && !nx.noLog && bellsFor(nex).length ? `<div class="small">${currentWeight(nex.id)} kg</div>` : ''}</div></div>
       ${tip ? `<div class="note">${icon('bulb', 18)}<span>${esc(tip)}</span></div>` : ''}`;
   }
 
@@ -576,9 +690,10 @@ views.run = () => {
   return `${head}
     <div class="demo-card run"><div class="demo" data-demo="${ex.id}"></div><span class="demo-label" data-demo-label></span></div>
     <div class="run-ex">
-      <div class="eyebrow-d">${s.label}</div>
+      <div class="eyebrow-d ${s.phase || ''}">${s.label}</div>
       <h1>${esc(ex.name)}</h1>
-      ${weightChips(ex)}
+      ${s.emom ? `<div class="center"><span class="pill dark">${icon('timer', 14)} Queda del minuto: <b id="emom">${fmtTime((run.windowEnd - Date.now()) / 1000)}</b></span></div>` : ''}
+      ${s.noLog ? '<p class="muted small center">Suave, solo para entrar en calor o soltar el cuerpo.</p>' : weightChips(ex)}
       ${action}
     </div>
     <div class="row" style="margin-top:12px"><button class="btn grow" data-act="exercise" data-id="${ex.id}">${icon('info', 16)} Técnica</button><button class="btn grow" data-act="work-skip">${icon('skip', 16)} Saltar</button></div>
@@ -587,7 +702,7 @@ views.run = () => {
 
 function completeWork(skipped) {
   const s = run.steps[run.i];
-  if (!skipped) {
+  if (!skipped && !s.noLog) {
     const sides = s.side ? 2 : 1;
     const secs = s.secs ? Math.round((run.timerEnd ? run.timerTotal / 1000 - Math.max(0, (run.timerEnd - Date.now()) / 1000) : s.secs * sides) / sides) : 0;
     const ex = exById(s.ex);
@@ -599,33 +714,304 @@ function completeWork(skipped) {
   }
   run.timerEnd = null;
   if (run.i >= run.steps.length - 1) return finishRun();
-  const rest = s.rest || 0;
+  let rest = s.rest || 0;
+  if (s.emom) rest = Math.max(0, (run.windowEnd - Date.now()) / 1000);
   run.i++;
-  run.reps = run.steps[run.i].reps;
-  if (rest > 0 && !skipped) { run.phase = 'rest'; run.restTotal = rest * 1000; run.restEnd = Date.now() + run.restTotal; }
-  else run.phase = 'work';
-  render();
+  if (rest > 0.5 && !skipped) {
+    Object.assign(run, { phase: 'rest', restTotal: rest * 1000, restEnd: Date.now() + rest * 1000 });
+    const nx = exById(run.steps[run.i].ex);
+    if (rest > 6) Voice.say(s.emom ? `Descansa hasta el próximo minuto. Luego, ${nx.name}.` : `Descanso, ${Math.round(rest)} segundos. Luego, ${nx.name}.`, true);
+    render();
+  } else enterWork();
+}
+
+// Cuenta regresiva con voz (o pitidos si la voz está apagada).
+function countdown(left) {
+  if (left <= 3.05 && left > 0 && Math.ceil(left) !== tick.lastBeep) {
+    tick.lastBeep = Math.ceil(left);
+    if (Voice.on()) Voice.say(String(tick.lastBeep), true); else beep(660, 100);
+  }
 }
 
 function tick() {
   if (!run) return;
   const el = document.getElementById('elapsed');
   if (el) el.textContent = fmtTime((Date.now() - run.start) / 1000);
+  if (run.mode === 'amrap') return tickAmrap();
+  if (run.mode === 'test') return tickTest();
   if (route.name !== 'run') return;
+  const s = run.steps[run.i];
+  const em = document.getElementById('emom');
+  if (em && run.windowEnd) em.textContent = fmtTime((run.windowEnd - Date.now()) / 1000);
   const end = run.phase === 'rest' ? run.restEnd : run.timerEnd;
   if (!end) return;
   const left = (end - Date.now()) / 1000;
   const t = document.getElementById('timer');
   if (t) t.textContent = fmtTime(left);
   if (run.phase === 'rest') setRing('ring-rest', left / (run.restTotal / 1000));
-  else setRing('ring-work', left / (run.timerTotal / 1000));
-  if (left <= 3.05 && left > 0 && Math.ceil(left) !== tick.lastBeep) { tick.lastBeep = Math.ceil(left); beep(660, 100); }
+  else {
+    setRing('ring-work', left / (run.timerTotal / 1000));
+    if (s.side && !run.halfSaid && left <= run.timerTotal / 2000) { run.halfSaid = true; beep(880, 150); Voice.say('Cambia de lado', true); }
+  }
+  countdown(left);
   if (left <= 0) {
     tick.lastBeep = null;
     beep(990, 350);
     if (navigator.vibrate) navigator.vibrate(300);
-    if (run.phase === 'rest') { run.phase = 'work'; run.restEnd = null; render(); }
+    if (run.phase === 'rest') enterWork();
     else completeWork(false);
+  }
+}
+
+// ---------- AMRAP: todas las rondas posibles en X minutos ----------
+
+function startAmrap(routine, common, notes) {
+  const b = routine.blocks.find(x => x.amrap);
+  run = { ...common, mode: 'amrap', items: b.circuit, minutes: b.amrap, endAt: Date.now() + b.amrap * 60000, rounds: 0, pos: 0, reps: b.circuit[0].reps, lastMin: b.amrap };
+  requestWakeLock();
+  route = { name: 'amrap', params: {} }; stack = [];
+  if (notes.length) toast(notes[0]);
+  Voice.say(`AMRAP de ${b.amrap} minutos. Todas las rondas que puedas, con buena técnica. Empezamos con ${exById(b.circuit[0].ex).name}.`, true);
+  render();
+}
+
+views.amrap = () => {
+  const total = run.minutes * 60, left = (run.endAt - Date.now()) / 1000;
+  const it = run.items[run.pos], ex = exById(it.ex);
+  return `${runHead(Math.min(100, (1 - left / total) * 100))}
+    <div class="row" style="align-items:center;gap:16px">
+      ${ring(left / total, 130, 10, `<div class="timer sm" id="timer">${fmtTime(left)}</div>`, 'ring-amrap')}
+      <div class="grow"><div class="muted small">Rondas completas</div><div class="target" style="text-align:left">${run.rounds}</div>
+        <div class="muted small">AMRAP ${run.minutes} min</div></div>
+    </div>
+    <div class="demo-card run" style="margin-top:12px"><div class="demo" data-demo="${ex.id}"></div><span class="demo-label" data-demo-label></span></div>
+    <div class="run-ex"><div class="eyebrow-d">Ejercicio ${run.pos + 1}/${run.items.length}</div><h1>${esc(ex.name)}</h1>
+      <div class="muted center">${targetText(it)}</div>${weightChips(ex)}</div>
+    <button class="btn primary block big" data-act="amrap-next">${icon('check', 20)} Hecho</button>
+    <div class="card" style="margin-top:12px">${run.items.map((x, i) => `<div class="list-item ${i === run.pos ? 'accent' : 'muted'}">
+      <span class="num">${i + 1}</span><span class="grow">${esc(exById(x.ex).name)}</span><span>${targetText(x)}</span></div>`).join('')}</div>
+    <button class="btn block" data-act="run-quit">Terminar ahora</button>`;
+};
+
+function amrapNext() {
+  const it = run.items[run.pos], ex = exById(it.ex);
+  run.sets.push({ ex: it.ex, weight: ex.load === 'none' ? 0 : currentWeight(it.ex), reps: it.reps, secs: 0, side: !!it.side, target: it.reps });
+  run.pos = (run.pos + 1) % run.items.length;
+  if (run.pos === 0) { run.rounds++; beep(880, 120); Voice.say(`Ronda ${run.rounds} completa. ${exById(run.items[0].ex).name}.`, true); }
+  else Voice.say(exById(run.items[run.pos].ex).name, true);
+  render();
+}
+
+function tickAmrap() {
+  const left = (run.endAt - Date.now()) / 1000;
+  const t = document.getElementById('timer');
+  if (t) t.textContent = fmtTime(left);
+  setRing('ring-amrap', left / (run.minutes * 60));
+  const min = Math.ceil(left / 60);
+  if (min < run.lastMin && left > 15) { run.lastMin = min; Voice.say(`Quedan ${min} minuto${min > 1 ? 's' : ''}.`); }
+  if (left <= 10.05 && left > 9 && !run.said10) { run.said10 = true; Voice.say('Últimos diez segundos. ¡Con todo!', true); }
+  countdown(left);
+  if (left <= 0) {
+    tick.lastBeep = null; beep(990, 400);
+    Voice.say(`¡Tiempo! Hiciste ${run.rounds} rondas.`, true);
+    finishRun();
+  }
+}
+
+// ---------- Tests ----------
+
+function startTest(t) {
+  run = { mode: 'test', test: t, name: t.name, start: Date.now(), count: 0, stage: 'ready', endAt: null, sets: [], weights: {}, reasons: {} };
+  requestWakeLock();
+  route = { name: 'test-run', params: {} }; stack = [{ name: 'tests', params: {} }];
+  Voice.say(`${t.name}. ${t.desc}`, true);
+  render();
+}
+
+views['test-run'] = () => {
+  const t = run.test, ex = exById(t.ex);
+  const left = run.endAt ? (run.endAt - Date.now()) / 1000 : t.secs;
+  if (run.stage === 'done') {
+    return `${topbar(t.name)}
+      <div class="sum-head"><div class="ob-logo ok">${icon('target', 44)}</div><h1>¡Test terminado!</h1></div>
+      <label class="field"><span>Resultado (${t.unit})</span><input type="number" inputmode="numeric" id="test-result" value="${run.count}"></label>
+      <button class="btn primary block big" data-act="test-save">Guardar resultado</button>
+      <button class="btn block" style="margin-top:8px" data-act="test-discard">Descartar</button>`;
+  }
+  return `${runHead(t.secs && run.endAt ? (1 - left / t.secs) * 100 : 0)}
+    <div class="demo-card run"><div class="demo" data-demo="${ex.id}"></div><span class="demo-label" data-demo-label></span></div>
+    <p class="muted center" style="margin-top:10px">${esc(t.desc)}</p>
+    ${ex.load !== 'none' ? weightChips(ex) : ''}
+    ${run.stage === 'ready' ? `<button class="btn primary block big" data-act="test-start">${icon('play', 18)} Empezar${t.secs ? ` (${fmtTime(t.secs)})` : ''}</button>`
+      : run.stage === 'count' ? `<div class="timer center" id="timer">${Math.ceil((run.endAt - Date.now()) / 1000)}</div>`
+      : `${t.secs ? `<div class="center">${ring(left / t.secs, 140, 10, `<div class="timer sm" id="timer">${fmtTime(left)}</div>`, 'ring-test')}</div>` : ''}
+        <div class="center muted small" style="margin-top:8px">Toca el botón grande en cada repetición</div>
+        <button class="tap-btn" data-act="test-tap"><span id="test-count">${run.count}</span><small>${t.unit}</small></button>
+        <div class="row"><button class="btn grow" data-act="test-minus">${icon('minus', 16)} Quitar 1</button><button class="btn grow" data-act="test-end">${icon('check', 16)} Terminar</button></div>`}`;
+};
+
+function tickTest() {
+  if (route.name !== 'test-run') return;
+  if (run.stage === 'count') {
+    const left = (run.endAt - Date.now()) / 1000;
+    const t = document.getElementById('timer');
+    if (t) t.textContent = Math.max(1, Math.ceil(left));
+    countdown(left);
+    if (left <= 0) {
+      tick.lastBeep = null;
+      Voice.say('¡Ya!', true); beep(990, 300);
+      Object.assign(run, { stage: 'go', start: Date.now(), endAt: run.test.secs ? Date.now() + run.test.secs * 1000 : null });
+      render();
+    }
+  } else if (run.stage === 'go' && run.endAt) {
+    const left = (run.endAt - Date.now()) / 1000;
+    const t = document.getElementById('timer');
+    if (t) t.textContent = fmtTime(left);
+    setRing('ring-test', left / run.test.secs);
+    if (Math.round(left) === 30 && !run.said30) { run.said30 = true; Voice.say('Treinta segundos.'); }
+    countdown(left);
+    if (left <= 0) { tick.lastBeep = null; beep(990, 400); Voice.say(`¡Tiempo! ${run.count} ${run.test.unit}.`, true); run.stage = 'done'; run.end = Date.now(); render(); }
+  }
+}
+
+views.tests = () => `
+  ${topbar('Tests')}
+  <p class="muted">Repite cada test cada 4 semanas para ver cuánto mejoraste.${programWeek()?.test ? ' <strong class="accent">Esta semana toca test en tu programa.</strong>' : ''}</p>
+  ${testsFor().map(t => {
+    const h = testHistory(t.id), last = h[h.length - 1], best = h.length ? Math.max(...h.map(x => x.result)) : null;
+    return `<div class="card">
+      <div class="row"><div class="thumb sm">${exerciseThumb(exById(t.ex))}</div><div class="grow"><h3>${esc(t.name)}</h3>
+        <div class="muted small">${last ? `Último: ${last.result} ${t.unit} · ${fmtDate(last.date)}${best > last.result ? ` · mejor: ${best}` : ''}` : 'Todavía no lo hiciste'}</div></div>
+        <button class="btn small" data-act="test-go" data-id="${t.id}">${icon('play', 14)} Hacer</button></div>
+      ${h.length > 1 ? lineChart(h.map(x => ({ label: fmtDate(x.date, { day: 'numeric', month: 'numeric' }), v: x.result })), v => `${v}`) : ''}
+    </div>`;
+  }).join('')}`;
+
+// ---------- Entrenamiento rápido ----------
+
+views.quick = () => {
+  const q = route.params;
+  q.r ||= generateQuick(q);
+  const bells = bellWeights();
+  const items = routineItems(q.r);
+  return `${topbar('Entrenamiento rápido')}
+    <div class="card">
+      <div class="muted small">¿Cuánto tiempo tienes?</div>
+      <div class="seg">${[10, 15, 20, 30].map(n => `<button class="${q.minutes === n ? 'on' : ''}" data-act="q-set" data-field="minutes" data-id="${n}">${n}′</button>`).join('')}</div>
+      <div class="muted small" style="margin-top:12px">¿Qué quieres trabajar?</div>
+      <div class="chips">${Object.entries(QUICK_FOCUS).map(([k, f]) => `<button class="chip ${q.focus === k ? 'on' : ''}" data-act="q-set" data-field="focus" data-id="${k}">${f.name}</button>`).join('')}</div>
+      <div class="muted small" style="margin-top:6px">¿Con qué pesa?</div>
+      <div class="chips"><button class="chip ${!q.bell ? 'on' : ''}" data-act="q-set" data-field="bell" data-id="">Las que tengo</button>
+        ${bells.map(b => `<button class="chip ${q.bell === b ? 'on' : ''}" data-act="q-set" data-field="bell" data-id="${b}">Solo ${b} kg</button>`).join('')}</div>
+    </div>
+    <h2>${icon('spark', 18, 'accent')} Tu sesión: ${q.r.blocks[0].rounds} rondas de</h2>
+    ${items.map(it => `<div class="card excard click" data-act="exercise" data-id="${it.ex}"><div class="thumb sm">${exerciseThumb(exById(it.ex))}</div>
+      <div class="grow"><h3>${esc(exById(it.ex).name)}</h3><div class="muted small">${targetText(it)}</div></div></div>`).join('')}
+    <p class="muted small">~${estimateMin(q.r)} min · 15 s entre ejercicios y 45 s entre rondas.</p>
+    <div class="row"><button class="btn grow" data-act="q-regen">${icon('shuffle', 16)} Otra opción</button><button class="btn grow" data-act="q-save">${icon('plus', 16)} Guardar</button></div>
+    <div class="sticky-cta"><button class="btn primary block big" data-act="q-go">${icon('play', 18)} Empezar</button></div>`;
+};
+
+// ---------- Timers: EMOM, Tabata, AMRAP, Escalera ----------
+
+const TIMER_MODES = {
+  emom: { name: 'EMOM', text: 'Cada minuto, haz las reps; lo que sobra del minuto es descanso. Si eliges varios ejercicios, se alternan.' },
+  tabata: { name: 'Tabata', text: 'Trabajo a tope y pausa corta, 8 veces por ejercicio.' },
+  amrap: { name: 'AMRAP', text: 'Todas las rondas posibles del circuito en el tiempo elegido.' },
+  escalera: { name: 'Escalera', text: 'Subes 1, 2, 3… reps por escalón con pausas cortas. Mucho volumen sin agotarte.' },
+};
+
+function buildTimerRoutine(t) {
+  const exs = [t.ex1, t.ex2, t.ex3].filter(Boolean);
+  const item = (ex, extra) => ({ ex, side: !!exById(ex).uni, ...extra });
+  let blocks;
+  if (t.mode === 'emom') blocks = [{ circuit: exs.map(ex => item(ex, { reps: t.reps, emom: 60, fixedRest: true })), rounds: Math.max(1, Math.round(t.minutes / exs.length)), restRound: 0 }];
+  if (t.mode === 'tabata') blocks = exs.map(ex => item(ex, { sets: 8, secs: t.work, rest: t.pause, autoStart: true, fixedRest: true }));
+  if (t.mode === 'amrap') blocks = [{ amrap: t.minutes, circuit: exs.map(ex => item(ex, { reps: t.reps })) }];
+  if (t.mode === 'escalera') blocks = Array.from({ length: t.ladders }, () => ({ ladder: Array.from({ length: t.top }, (_, i) => i + 1), circuit: exs.map(ex => item(ex, {})), rest: 30 }));
+  return { id: 'timer', custom: true, quick: true, format: TIMER_MODES[t.mode].name, goal: goalsOf()[0],
+    name: `${TIMER_MODES[t.mode].name} · ${exs.map(e => exById(e).name).join(' + ')}`, desc: TIMER_MODES[t.mode].text, blocks };
+}
+
+views.timers = () => {
+  const t = route.params;
+  const exOptions = (field, optional) => `<select data-bind="t.${field}">${optional ? '<option value="">— Ninguno —</option>' : ''}${GROUPS.filter(g => g !== 'Movilidad').map(g => `<optgroup label="${g}">${EXERCISES.filter(e => e.group === g && e.level <= level()).map(e => `<option value="${e.id}" ${t[field] === e.id ? 'selected' : ''}>${esc(e.name)}</option>`).join('')}</optgroup>`).join('')}</select>`;
+  const seg = (field, values, fmt = v => v) => `<div class="seg">${values.map(v => `<button class="${t[field] === v ? 'on' : ''}" data-act="t-set" data-field="${field}" data-id="${v}">${fmt(v)}</button>`).join('')}</div>`;
+  const r = buildTimerRoutine(t);
+  return `${topbar('Timers')}
+    <div class="seg wide">${Object.entries(TIMER_MODES).map(([k, m]) => `<button class="${t.mode === k ? 'on' : ''}" data-act="t-set" data-field="mode" data-id="${k}">${m.name}</button>`).join('')}</div>
+    <div class="note">${icon('info', 18)}<span class="small">${TIMER_MODES[t.mode].text}</span></div>
+    <div class="card">
+      <label class="field"><span>Ejercicio 1</span>${exOptions('ex1', false)}</label>
+      <label class="field"><span>Ejercicio 2 (opcional)</span>${exOptions('ex2', true)}</label>
+      <label class="field"><span>Ejercicio 3 (opcional)</span>${exOptions('ex3', true)}</label>
+      ${t.mode === 'emom' || t.mode === 'amrap' ? `<div class="muted small">Minutos</div>${seg('minutes', t.mode === 'emom' ? [8, 10, 12, 16, 20] : [8, 10, 15, 20])}
+        <div class="muted small" style="margin-top:12px">Repeticiones por ejercicio</div>${seg('reps', [5, 8, 10, 12, 15, 20])}` : ''}
+      ${t.mode === 'tabata' ? `<div class="muted small">Trabajo / pausa</div><div class="seg">${[[20, 10], [30, 15], [40, 20]].map(([w, p]) => `<button class="${t.work === w ? 'on' : ''}" data-act="t-work" data-id="${w}-${p}">${w}/${p} s</button>`).join('')}</div>` : ''}
+      ${t.mode === 'escalera' ? `<div class="muted small">Escalón más alto</div>${seg('top', [3, 4, 5, 6, 8, 10], v => `1→${v}`)}
+        <div class="muted small" style="margin-top:12px">Cuántas escaleras</div>${seg('ladders', [1, 2, 3, 4, 5])}` : ''}
+    </div>
+    <p class="muted small">~${estimateMin(r)} min${t.mode !== 'amrap' ? ' más calentamiento y estiramiento' : ''}.</p>
+    <div class="sticky-cta"><button class="btn primary block big" data-act="t-go">${icon('play', 18)} Empezar ${TIMER_MODES[t.mode].name}</button></div>`;
+};
+
+// ---------- Resumen del mes ----------
+
+views.wrapped = () => {
+  const key = route.params.month || monthKey();
+  const [y, m] = key.split('-').map(Number);
+  const name = new Date(y, m - 1, 1).toLocaleDateString('es-AR', { month: 'long', year: 'numeric' });
+  const st = monthStats(key);
+  const prev = monthKey(new Date(y, m - 2, 1)), next = monthKey(new Date(y, m, 1));
+  const tile = (v, l, cls = '') => `<div class="w-tile ${cls}"><div class="v">${v}</div><div class="l">${l}</div></div>`;
+  return `${topbar('Resumen del mes')}
+    <div class="row between" style="margin-bottom:10px"><button class="icon-btn" data-act="wr-month" data-id="${prev}">${icon('left', 18)}</button>
+      <strong class="cap">${name}</strong>
+      <button class="icon-btn" data-act="wr-month" data-id="${next}" ${next > monthKey() ? 'disabled' : ''}>${icon('right', 18)}</button></div>
+    ${st.sessions ? `<div class="wrapped" id="wrapped">
+      <div class="w-head"><div class="logo">Iron<b>K</b></div><div class="cap">${name}</div></div>
+      <div class="w-big">${st.sessions}<small>entrenamientos</small></div>
+      <div class="w-grid">
+        ${tile(fmtKg(st.volume), 'levantados')}${tile(st.kcal.toLocaleString('es-AR'), 'kcal quemadas')}
+        ${tile(fmtDuration(st.time), 'entrenando')}${tile(st.days, 'días activos')}
+        ${tile(st.streak, 'mejor racha')}${tile(st.prs.length, 'récords', st.prs.length ? 'hot' : '')}
+      </div>
+      ${st.topEx ? `<div class="w-line">${icon('kb', 18)} Tu ejercicio estrella: <strong>${esc(st.topEx)}</strong></div>` : ''}
+      ${st.bestWeek ? `<div class="w-line">${icon('chart', 18)} Tu mejor semana: <strong>${fmtKg(st.bestWeek)}</strong></div>` : ''}
+      <div class="w-line">${icon('medal', 18)} Ganaste <strong>${st.xp.toLocaleString('es-AR')} XP</strong></div>
+    </div>
+    <button class="btn primary block big" style="margin-top:14px" data-act="wr-share" data-id="${key}">${icon('upload', 18)} Compartir imagen</button>`
+    : '<p class="empty">No hay entrenamientos en este mes.</p>'}`;
+};
+
+// Dibuja el resumen como imagen (1080×1350) para compartir o guardar.
+async function shareWrapped(key) {
+  const [y, m] = key.split('-').map(Number);
+  const name = new Date(y, m - 1, 1).toLocaleDateString('es-AR', { month: 'long', year: 'numeric' });
+  const st = monthStats(key);
+  const c = document.createElement('canvas'); c.width = 1080; c.height = 1350;
+  const g = c.getContext('2d');
+  const grad = g.createLinearGradient(0, 0, 1080, 1350);
+  grad.addColorStop(0, '#ff8a2b'); grad.addColorStop(0.55, '#ff4d2e'); grad.addColorStop(1, '#7a1d12');
+  g.fillStyle = grad; g.fillRect(0, 0, 1080, 1350);
+  g.fillStyle = '#fff'; g.font = '800 64px Segoe UI, system-ui, sans-serif'; g.fillText('IronK', 80, 130);
+  g.font = '500 44px Segoe UI, system-ui, sans-serif'; g.fillText(name.charAt(0).toUpperCase() + name.slice(1), 80, 200);
+  g.font = '800 260px Segoe UI, system-ui, sans-serif'; g.fillText(String(st.sessions), 70, 480);
+  g.font = '600 48px Segoe UI, system-ui, sans-serif'; g.fillText('entrenamientos', 90, 550);
+  const tiles = [[fmtKg(st.volume), 'levantados'], [st.kcal.toLocaleString('es-AR'), 'kcal'], [fmtDuration(st.time), 'entrenando'], [String(st.days), 'días activos'], [String(st.streak), 'mejor racha'], [String(st.prs.length), 'récords']];
+  tiles.forEach(([v, l], i) => {
+    const x = 80 + (i % 2) * 470, yy = 640 + Math.floor(i / 2) * 190;
+    g.fillStyle = 'rgba(0,0,0,.22)'; g.beginPath(); g.roundRect(x, yy, 440, 160, 28); g.fill();
+    g.fillStyle = '#fff'; g.font = '800 64px Segoe UI, system-ui, sans-serif'; g.fillText(v, x + 32, yy + 82);
+    g.font = '500 34px Segoe UI, system-ui, sans-serif'; g.fillText(l, x + 32, yy + 130);
+  });
+  if (st.topEx) { g.font = '600 38px Segoe UI, system-ui, sans-serif'; g.fillText(`Ejercicio estrella: ${st.topEx}`, 80, 1250); }
+  const blob = await new Promise(res => c.toBlob(res, 'image/png'));
+  const file = new File([blob], `ironk-${key}.png`, { type: 'image/png' });
+  if (navigator.canShare?.({ files: [file] })) {
+    try { await navigator.share({ files: [file], title: `Mi mes en IronK` }); } catch (e) { /* cancelado */ }
+  } else {
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = file.name; a.click(); URL.revokeObjectURL(a.href);
   }
 }
 
@@ -672,6 +1058,7 @@ function finishRun() {
   run.end = Date.now();
   run.prs = detectPRs(run.sets);
   releaseWakeLock();
+  if (run.mode === 'guided') Voice.say(run.prs.length ? '¡Entrenamiento completo, y con récord nuevo! Buen trabajo.' : '¡Entrenamiento completo! Buen trabajo.', true);
   if (run.prs.length) { beep(784, 150); setTimeout(() => beep(1046, 250), 160); }
   route = { name: 'summary', params: { effort: 7 } }; stack = [];
   render();
@@ -681,14 +1068,17 @@ const EFFORT_LABEL = n => n <= 3 ? 'Fácil' : n <= 6 ? 'Moderado' : n <= 8 ? 'Du
 
 views.summary = () => {
   const dur = (run.end - run.start) / 1000, e = route.params.effort;
+  const xp = sessionXp({ duration: dur, sets: run.sets, prs: run.prs });
+  const before = rankInfo(), after = rankInfo(before.xp + xp);
   return `
     <div class="sum-head"><div class="ob-logo ok">${icon(run.prs.length ? 'trophy' : 'check', 44)}</div>
-      <h1>¡Sesión completa!</h1><p class="muted">${esc(run.name)}</p></div>
+      <h1>¡Sesión completa!</h1><p class="muted">${esc(run.name)}${run.mode === 'amrap' ? ` · ${run.rounds} rondas` : ''}</p>
+      <span class="pill xp">+${xp} XP</span>${after.idx > before.idx ? ` <span class="pill xp">¡Nuevo rango: ${after.rank}!</span>` : ''}</div>
     <div class="stats">
       <div class="stat"><div class="v">${fmtDuration(dur)}</div><div class="l">duración</div></div>
-      <div class="stat"><div class="v">${run.sets.length}</div><div class="l">series</div></div>
+      <div class="stat"><div class="v" id="sum-kcal">${estimateKcal(run.sets, dur, e)}</div><div class="l">kcal estimadas</div></div>
       <div class="stat"><div class="v">${fmtKg(sessionVolume({ sets: run.sets }))}</div><div class="l">peso levantado</div></div>
-      <div class="stat"><div class="v">${new Set(run.sets.map(s => s.ex)).size}</div><div class="l">ejercicios</div></div>
+      <div class="stat"><div class="v">${run.sets.length}</div><div class="l">series · ${new Set(run.sets.map(s => s.ex)).size} ejercicios</div></div>
     </div>
     ${run.prs.length ? `<h2>${icon('trophy', 18, 'accent')} Nuevos récords</h2><div class="card pr">${run.prs.map(p => `<div class="list-item"><div class="grow"><strong>${esc(exById(p.ex).name)}</strong><div class="muted small">${p.type}</div></div><strong class="accent">${p.value}</strong></div>`).join('')}</div>` : ''}
     <h2>¿Qué tan duro fue?</h2>
@@ -706,7 +1096,7 @@ function sessionCard(s) {
   return `<div class="card click scard" data-act="session" data-id="${s.id}">
     <div class="date-badge"><b>${new Date(s.date).getDate()}</b><span>${fmtDate(s.date, { month: 'short' }).replace('.', '')}</span></div>
     <div class="grow"><h3>${esc(s.name)}${s.prs?.length ? ` <span class="accent">${icon('trophy', 14)}</span>` : ''}</h3>
-      <div class="muted small">${fmtDuration(s.duration)} · ${s.sets.length} series · ${fmtKg(sessionVolume(s))}</div></div>
+      <div class="muted small">${fmtDuration(s.duration)} · ${fmtKg(sessionVolume(s))} · ${sessionKcal(s)} kcal</div></div>
     ${s.effort ? `<span class="tag">${s.effort}/10</span>` : ''}${icon('right', 16)}</div>`;
 }
 
@@ -729,20 +1119,24 @@ function calendar() {
     <div class="cal">${cells}</div></div>`;
 }
 
-function weeklyBars(weeksBack = 10) {
+// metric: 'kg' (peso levantado) o 'kcal' (calorías estimadas).
+function weeklyBars(metric = 'kg', weeksBack = 10) {
   const ws = weekStart(new Date()).getTime(), weeks = [];
+  const val = s => metric === 'kcal' ? sessionKcal(s) : sessionVolume(s);
+  const fmt = v => metric === 'kcal' ? `${Math.round(v)} kcal` : fmtKg(v);
   for (let i = weeksBack - 1; i >= 0; i--) {
     const a = ws - i * 7 * DAY, list = sessionsBetween(a, a + 7 * DAY);
     const d = new Date(a);
-    weeks.push({ label: `${d.getDate()}/${d.getMonth() + 1}`, vol: list.reduce((x, s) => x + sessionVolume(s), 0), n: list.length });
+    weeks.push({ label: `${d.getDate()}/${d.getMonth() + 1}`, vol: list.reduce((x, s) => x + val(s), 0), n: list.length });
   }
   const max = Math.max(1, ...weeks.map(w => w.vol));
-  return `<div class="bars">${weeks.map((w, i) => `<div class="b ${i === weeks.length - 1 ? 'cur' : ''}" title="${fmtKg(w.vol)} · ${w.n} sesiones"><em>${w.n || ''}</em><i style="height:${(w.vol / max) * 100}%"></i><small>${w.label}</small></div>`).join('')}</div>`;
+  return `<div class="bars">${weeks.map((w, i) => `<div class="b ${i === weeks.length - 1 ? 'cur' : ''} ${metric}" title="${fmt(w.vol)} · ${w.n} sesiones"><em>${w.n || ''}</em><i style="height:${(w.vol / max) * 100}%"></i><small>${w.label}</small></div>`).join('')}</div>
+    <div class="row between muted small" style="margin-top:6px"><span>Esta semana: <strong class="accent">${fmt(weeks[weeks.length - 1].vol)}</strong></span><span>El número arriba = sesiones</span></div>`;
 }
 
 views.progress = () => {
   const p = ui.prog;
-  const seg = `<div class="seg wide">${[['resumen', 'Resumen'], ['ejercicios', 'Ejercicios'], ['cuerpo', 'Cuerpo'], ['logros', 'Logros']].map(([k, v]) =>
+  const seg = `<div class="seg wide">${[['resumen', 'Resumen'], ['ejercicios', 'Ejercicios'], ['cuerpo', 'Cuerpo'], ['retos', 'Retos'], ['logros', 'Logros']].map(([k, v]) =>
     `<button class="${p === k ? 'on' : ''}" data-act="prog" data-id="${k}">${v}</button>`).join('')}</div>`;
   return `<h1>Progreso</h1>${seg}${progressViews[p]()}${tabbar()}`;
 };
@@ -767,11 +1161,15 @@ const progressViews = {
         <div class="stat"><div class="v">${streakDays()} <small class="muted">/ ${longestStreak()}</small></div><div class="l">racha actual / mejor</div></div>
         <div class="stat"><div class="v">${avgEffort}</div><div class="l">esfuerzo promedio</div></div>
         <div class="stat"><div class="v">${s.reduce((a, x) => a + (x.prs?.length || 0), 0)}</div><div class="l">récords personales</div></div>
+        <div class="stat"><div class="v">${s.reduce((a, x) => a + sessionKcal(x), 0).toLocaleString('es-AR')}</div><div class="l">kcal quemadas (estimado)</div></div>
+        <div class="stat"><div class="v">${monthSessions(monthKey()).reduce((a, x) => a + sessionKcal(x), 0).toLocaleString('es-AR')}</div><div class="l">kcal este mes</div></div>
       </div>
+      <button class="btn block" style="margin-top:10px" data-act="go-wrapped">${icon('spark', 16)} Ver resumen del mes</button>
       <h2>Lo que dicen tus números</h2>
-      <div class="card">${insights().map(i => `<div class="insight">${icon(i.icon, 18, 'accent')}<span class="grow">${esc(i.text)}</span>${i.action ? `<button class="btn small" data-act="${i.action}">Sí</button>` : ''}</div>`).join('')}</div>
-      <h2>Peso levantado por semana</h2>
-      <div class="card">${weeklyBars()}<p class="muted small" style="margin:6px 0 0">El número arriba de cada barra son las sesiones de esa semana.</p></div>
+      <div class="card">${insights().map(insightRow).join('')}</div>
+      <h2>${ui.bars === 'kcal' ? 'Calorías por semana' : 'Peso levantado por semana'}</h2>
+      <div class="seg">${[['kg', 'Peso levantado'], ['kcal', 'Calorías']].map(([k, v]) => `<button class="${(ui.bars || 'kg') === k ? 'on' : ''}" data-act="bars" data-id="${k}">${v}</button>`).join('')}</div>
+      <div class="card">${weeklyBars(ui.bars || 'kg')}</div>
       <h2>Calendario</h2>
       ${calendar()}
       <h2>Actividades</h2>
@@ -808,10 +1206,20 @@ const progressViews = {
         <button class="btn primary" data-act="body-log">Registrar</button></div></div>
       ${log.length ? `<div class="card">${[...log].reverse().slice(0, 8).map(b => `<div class="list-item"><div class="grow muted">${fmtDate(b.date)}</div><strong>${b.weight} kg</strong></div>`).join('')}</div>` : ''}`;
   },
+  retos() {
+    const monthName = new Date().toLocaleDateString('es-AR', { month: 'long' });
+    return `<p class="muted">Únete a los desafíos de ${monthName}: tus entrenamientos suman solos. Cada desafío cumplido da 200 XP.</p>
+      ${challengeCards()}
+      <h2>${icon('target', 18, 'accent')} Tests</h2>
+      <div class="card click row" data-act="go-tests"><span class="grow">Mide tu progreso real cada 4 semanas</span>${icon('right', 16)}</div>`;
+  },
   logros() {
     const st = achievementStats();
     const got = ACHIEVEMENTS.filter(a => a.test(st)).length;
-    return `<p class="muted">${got} de ${ACHIEVEMENTS.length} desbloqueados</p>
+    return `${rankCard()}
+      <div class="card"><div class="muted small">Rangos</div><div class="ranks">${RANKS.map((r, i) => `<span class="${i <= rankInfo().idx ? 'on' : ''}">${r.name}<small>${r.xp.toLocaleString('es-AR')}</small></span>`).join('')}</div>
+        <div class="muted small">Ganas XP por minutos entrenados, series, récords, tests y desafíos.</div></div>
+      <p class="muted">${got} de ${ACHIEVEMENTS.length} logros desbloqueados</p>
       <div class="grid3">${ACHIEVEMENTS.map(a => {
         const ok = a.test(st);
         return `<div class="badge ${ok ? 'on' : ''}"><div class="medal">${icon(a.icon, 24)}</div><strong>${a.name}</strong><small>${a.desc}</small></div>`;
@@ -830,9 +1238,12 @@ views.session = () => {
     <div class="stats">
       <div class="stat"><div class="v">${fmtDuration(s.duration)}</div><div class="l">duración</div></div>
       <div class="stat"><div class="v">${fmtKg(sessionVolume(s))}</div><div class="l">peso levantado</div></div>
-      <div class="stat"><div class="v">${s.sets.length}</div><div class="l">series</div></div>
+      <div class="stat"><div class="v">${sessionKcal(s)}</div><div class="l">kcal estimadas</div></div>
       <div class="stat"><div class="v">${s.effort ? `${s.effort}/10` : '—'}</div><div class="l">${s.effort ? EFFORT_LABEL(s.effort) : 'esfuerzo'}</div></div>
+      <div class="stat"><div class="v">${s.sets.length}</div><div class="l">series</div></div>
+      <div class="stat"><div class="v">+${sessionXp(s)}</div><div class="l">XP ganados</div></div>
     </div>
+    ${s.checkin ? `<div class="note">${icon('heart', 18)}<span class="small">Llegaste con energía ${s.checkin.energy}, dormiste ${s.checkin.sleep}${s.checkin.pains?.length ? `, molestia en ${s.checkin.pains.map(p => PAINS[p].toLowerCase()).join(' y ')}` : ''}.</span></div>` : ''}
     ${s.note ? `<div class="note">${icon('edit', 18)}<span>${esc(s.note)}</span></div>` : ''}
     ${s.prs?.length ? `<h2>${icon('trophy', 18, 'accent')} Récords</h2><div class="card pr">${s.prs.map(p => `<div class="list-item"><div class="grow">${esc(exById(p.ex).name)} <span class="muted small">· ${p.type}</span></div><strong class="accent">${p.value}</strong></div>`).join('')}</div>` : ''}
     <h2>Detalle</h2>
@@ -848,6 +1259,7 @@ views.profile = () => {
   return `
     <div class="prof-head"><div class="avatar big">${esc((p.name || 'K')[0].toUpperCase())}</div>
       <div><h1 style="margin:0">${esc(p.name || 'Atleta IronK')}</h1><div class="muted small">${levelDots(p.level)} ${LEVELS[p.level].name} · ${goalsText(p)}</div></div></div>
+    <div style="margin-top:14px">${rankCard()}</div>
     <h2>Datos personales</h2>
     <div class="card">
       <label class="field"><span>Nombre</span><input data-bind="p.name" value="${esc(p.name || '')}"></label>
@@ -872,6 +1284,10 @@ views.profile = () => {
       <div class="muted small" style="margin-top:12px">Descanso entre series</div>
       ${restSeg()}
       <div class="muted small">"Recomendado" usa el descanso pensado para cada rutina y tu nivel. Durante el descanso también puedes sumar o restar 15 s.</div>
+      <div class="kv" style="margin-top:12px"><span>${icon('volume', 16)} Voz del coach</span>
+        <div class="seg mini">${[[true, 'Sí'], [false, 'No']].map(([v, l]) => `<button class="${(p.voice !== false) === v ? 'on' : ''}" data-act="p-toggle" data-field="voice" data-id="${v}">${l}</button>`).join('')}</div></div>
+      <div class="kv"><span>${icon('flame', 16)} Calentamiento y estiramiento</span>
+        <div class="seg mini">${[[true, 'Sí'], [false, 'No']].map(([v, l]) => `<button class="${(p.warmup !== false) === v ? 'on' : ''}" data-act="p-toggle" data-field="warmup" data-id="${v}">${l}</button>`).join('')}</div></div>
     </div>
     <h2>Mis pesas rusas</h2>
     <div class="note">${icon('bulb', 18)}<span>Para tu perfil, la pesa ideal de swing es de <strong>${ideal} kg</strong>. Marca "×2" si tienes un par (para ejercicios dobles).</span></div>
@@ -979,8 +1395,90 @@ const actions = {
     toast(`¡Nivel ${LEVELS[level()].name}! Tus rutinas se adaptaron`); render();
   },
 
-  'run-start': el => startRun(routineById(el.dataset.id)),
-  'run-weight': el => { run.weights[run.mode === 'free' ? run.ex : run.steps[run.i].ex] = Number(el.dataset.id); render(); },
+  'run-start': el => askCheckin(routineById(el.dataset.id)),
+  'run-weight': el => {
+    const ex = { free: run.ex, amrap: run.items?.[run.pos]?.ex, test: run.test?.ex }[run.mode] || run.steps[run.i].ex;
+    run.weights[ex] = Number(el.dataset.id); render();
+  },
+  'voice-toggle': () => {
+    db.profile.voice = db.profile.voice === false; touchSettings(); saveDb();
+    if (!Voice.on()) Voice.stop(); else Voice.say('Voz activada');
+    render();
+  },
+
+  // ¿Cómo te sientes hoy?
+  'ck-set': el => { route.params.c[el.dataset.field] = el.dataset.id; render(); },
+  'ck-pain': el => {
+    const c = route.params.c, k = el.dataset.id;
+    c.pains = c.pains.includes(k) ? c.pains.filter(x => x !== k) : [...c.pains, k]; render();
+  },
+  'ck-go': () => startRun(route.params.routine || routineById(route.params.id), route.params.c),
+  'ck-skip': () => startRun(route.params.routine || routineById(route.params.id), null),
+
+  // Rápido, timers, tests, programa, desafíos, resumen del mes
+  'go-quick': () => go('quick', { minutes: Math.min(30, db.profile.minutes || 15), focus: 'completo', bell: null }),
+  'q-set': el => {
+    const f = el.dataset.field, v = el.dataset.id;
+    route.params[f] = f === 'minutes' ? Number(v) : f === 'bell' ? (v ? Number(v) : null) : v;
+    route.params.r = null; render();
+  },
+  'q-regen': () => { route.params.r = null; render(); },
+  'q-go': () => askCheckin(route.params.r),
+  'q-save': () => {
+    const r = { ...structuredClone(route.params.r), id: 'c-' + uid(), quick: false, updatedAt: Date.now() };
+    db.customRoutines.push(r); saveDb(); toast('Guardada en Mis rutinas');
+  },
+  'go-timers': () => go('timers', { mode: 'emom', ex1: 'swing2', ex2: '', ex3: '', minutes: 10, reps: 10, work: 20, pause: 10, top: 5, ladders: 3 }),
+  't-set': el => {
+    const f = el.dataset.field, v = el.dataset.id;
+    route.params[f] = f === 'mode' ? v : Number(v);
+    if (f === 'mode' && v === 'escalera' && route.params.ex1 === 'swing2') route.params.ex1 = 'press';
+    render();
+  },
+  't-work': el => { const [w, p] = el.dataset.id.split('-').map(Number); Object.assign(route.params, { work: w, pause: p }); render(); },
+  't-go': () => askCheckin(buildTimerRoutine(route.params)),
+  'go-tests': () => go('tests'),
+  'test-go': el => startTest(TESTS.find(t => t.id === el.dataset.id)),
+  'test-start': () => { Object.assign(run, { stage: 'count', endAt: Date.now() + 3000 }); render(); },
+  'test-tap': () => {
+    run.count++; if (navigator.vibrate) navigator.vibrate(15);
+    const el = document.getElementById('test-count'); if (el) el.textContent = run.count;
+  },
+  'test-minus': () => { run.count = Math.max(0, run.count - 1); const el = document.getElementById('test-count'); if (el) el.textContent = run.count; },
+  'test-end': () => { Voice.say(`Terminado. ${run.count} ${run.test.unit}.`, true); run.stage = 'done'; run.end = Date.now(); render(); },
+  'test-save': () => {
+    const t = run.test, ex = exById(t.ex), result = Math.max(0, parseInt(document.getElementById('test-result').value, 10) || 0);
+    const weight = ex.load === 'none' ? 0 : currentWeight(t.ex);
+    const now = new Date().toISOString();
+    db.tests = [...(db.tests || []), { id: uid(), test: t.id, date: now, result, weight }];
+    const duration = Math.round(((run.end || Date.now()) - run.start) / 1000);
+    const sets = [{ ex: t.ex, weight, reps: result, secs: 0, side: false }];
+    db.sessions.push({ id: uid(), date: new Date(run.start).toISOString(), name: `Test: ${t.name}`, routineId: null, duration, sets, effort: 9, note: '', prs: detectPRs(sets), kcal: estimateKcal(sets, duration, 9) });
+    db.sessions.sort((a, b) => new Date(a.date) - new Date(b.date));
+    saveDb(); run = null; releaseWakeLock(); toast('Resultado guardado'); stack = []; route = { name: 'train', params: {} }; go('tests');
+  },
+  'test-discard': () => { if (confirm('¿Descartar el resultado?')) { run = null; releaseWakeLock(); stack = []; route = { name: 'train', params: {} }; go('tests'); } },
+  'amrap-next': () => amrapNext(),
+  'prog-start': () => {
+    db.profile.program = { start: weekStart(new Date()).toISOString() }; db.profile.programDone = false;
+    touchSettings(); saveDb(); toast('¡Programa de 8 semanas en marcha!'); render();
+  },
+  'prog-stop': () => {
+    if (!confirm('¿Dejar el programa de 8 semanas? Tus rutinas vuelven a su volumen normal.')) return;
+    if (programWeek()?.done) db.profile.programDone = true;
+    delete db.profile.program; touchSettings(); saveDb(); render();
+  },
+  'ch-join': el => {
+    db.challenges = [...(db.challenges || []), { id: `${el.dataset.id}:${monthKey()}`, ch: el.dataset.id, month: monthKey() }];
+    saveDb(); toast('¡Te uniste al desafío!'); render();
+  },
+  bars: el => { ui.bars = el.dataset.id; render(); },
+  'go-logros': () => { ui.prog = 'logros'; tab('progress'); },
+  'go-wrapped': () => go('wrapped', { month: monthKey() }),
+  'go-wrapped-prev': () => go('wrapped', { month: monthKey(new Date(new Date().getFullYear(), new Date().getMonth() - 1, 15)) }),
+  'wr-month': el => { if (el.dataset.id <= monthKey()) { route.params.month = el.dataset.id; render(); } },
+  'wr-share': el => shareWrapped(el.dataset.id),
+  'p-toggle': el => { db.profile[el.dataset.field] = el.dataset.id === 'true'; touchSettings(); saveDb(); render(); },
   reps: el => { run.reps = Math.max(0, (run.reps || 0) + Number(el.dataset.d)); render(); },
   'work-done': () => completeWork(false),
   'work-skip': () => completeWork(true),
@@ -992,7 +1490,7 @@ const actions = {
   'rest-add': () => { run.restEnd += 15000; run.restTotal += 15000; tick(); },
   'rest-sub': () => {
     run.restEnd -= 15000; run.restTotal = Math.max(1000, run.restTotal - 15000);
-    if (run.restEnd <= Date.now() + 500) { run.phase = 'work'; run.restEnd = null; render(); } else tick();
+    if (run.restEnd <= Date.now() + 500) enterWork(); else tick();
   },
   'ob-goal': el => { route.params.d.goals = toggleGoal(route.params.d.goals, el.dataset.id); render(); },
   'p-goal': el => {
@@ -1003,9 +1501,10 @@ const actions = {
     touchSettings(); saveDb(); render();
   },
   'rest-mode': el => { db.profile.rest = el.dataset.id; touchSettings(); saveDb(); render(); },
-  'rest-skip': () => { run.phase = 'work'; run.restEnd = null; render(); },
+  'rest-skip': () => enterWork(),
   'run-quit': () => {
-    if (!run.sets.length) { if (confirm('¿Salir sin registrar nada?')) { run = null; releaseWakeLock(); tab('home'); } return; }
+    if (run.mode === 'test') { if (confirm('¿Salir del test sin guardar?')) { Voice.stop(); run = null; releaseWakeLock(); tab('train'); } return; }
+    if (!run.sets.length) { if (confirm('¿Salir sin registrar nada?')) { Voice.stop(); run = null; releaseWakeLock(); tab('home'); } return; }
     if (confirm('¿Terminar la sesión ahora? Se guardará lo que hiciste hasta acá.')) finishRun();
   },
 
@@ -1024,6 +1523,8 @@ const actions = {
       id: uid(), date: new Date(run.start).toISOString(), name: run.name, routineId: run.routineId || null,
       duration: Math.round((run.end - run.start) / 1000), sets: run.sets, effort: route.params.effort,
       note: (route.params.note || '').trim(), prs: run.prs,
+      kcal: estimateKcal(run.sets, (run.end - run.start) / 1000, route.params.effort),
+      ...(run.checkin ? { checkin: run.checkin } : {}), ...(run.mode === 'amrap' ? { rounds: run.rounds } : {}),
     });
     db.sessions.sort((a, b) => new Date(a.date) - new Date(b.date));
     saveDb(); run = null; toast('Guardado en tu historial');
@@ -1123,6 +1624,7 @@ document.addEventListener('input', e => {
 document.addEventListener('change', e => {
   const key = e.target.dataset.bind, act = e.target.dataset.actChange;
   if (key === 'd.goal') route.params.draft.goal = e.target.value;
+  if (key?.startsWith('t.')) { route.params[key.slice(2)] = e.target.value; render(); }
   if (key === 'p.goal') { db.profile.goal = e.target.value; touchSettings(); saveDb(); }
   if (act === 'b-add' && e.target.value) {
     const ex = exById(e.target.value), timed = ex.type === 'Carga';

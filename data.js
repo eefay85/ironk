@@ -32,7 +32,7 @@ const MUSCLES = {
   hombros: 'Hombros', pecho: 'Pecho', brazos: 'Brazos', core: 'Core', agarre: 'Agarre',
 };
 
-const GROUPS = ['Cadera', 'Piernas', 'Espalda', 'Pecho', 'Hombros', 'Core', 'Cuerpo completo'];
+const GROUPS = ['Cadera', 'Piernas', 'Espalda', 'Pecho', 'Hombros', 'Core', 'Cuerpo completo', 'Movilidad'];
 
 const EXERCISES = [
   { id: 'swing2', name: 'Swing a dos manos', en: 'two hand kettlebell swing', group: 'Cadera', type: 'Balístico', load: 'heavy', level: 1,
@@ -254,6 +254,26 @@ const PHOTO_LABELS = {
   pushpress: ['Rack', 'Flexión corta', 'Impulsa y bloquea'], tgu: ['Acostado, brazo arriba', 'Rodilla al suelo', 'De pie'],
   cleanpress: ['Carga', 'Cargada', 'Press'], dclean: ['Carga', 'Recibe en rack'],
 };
+// Estiramientos para la vuelta a la calma (sin pesa, con figura animada).
+EXERCISES.push(
+  { id: 'st-isquios', name: 'Estiramiento de isquios', en: 'standing hamstring stretch', group: 'Movilidad', type: 'Estiramiento', load: 'none', level: 1,
+    muscles: ['isquios', 'gluteos'], desc: 'De pie, lleva la cadera atrás con las rodillas casi estiradas hasta sentir la parte de atrás de las piernas.',
+    cues: ['Espalda larga, no la redondees', 'Respira lento y relaja en cada exhalación'], mistakes: ['Rebotar'],
+    anim: [['stand', 'De pie'], ['rdlDown', 'Cadera atrás y mantén']] },
+  { id: 'st-cadera', name: 'Estiramiento de cadera', en: 'kneeling hip flexor stretch', group: 'Movilidad', type: 'Estiramiento', load: 'none', level: 1,
+    muscles: ['piernas', 'gluteos'], desc: 'En zancada con la rodilla de atrás apoyada, empuja suave la cadera adelante. Cambia de lado a la mitad.',
+    cues: ['Aprieta el glúteo de la pierna de atrás', 'Torso erguido'], mistakes: ['Arquear la zona lumbar'],
+    anim: [['lungeUp', 'De pie'], ['lungeDown', 'Cadera adelante y mantén']] },
+  { id: 'st-sentadilla', name: 'Sentadilla profunda sostenida', en: 'deep squat hold', group: 'Movilidad', type: 'Estiramiento', load: 'none', level: 1,
+    muscles: ['piernas', 'gluteos', 'core'], desc: 'Baja a una sentadilla profunda y quédate ahí, con el pecho alto y los codos empujando las rodillas.',
+    cues: ['Talones en el suelo', 'Balancéate suave de lado a lado'], mistakes: ['Levantar los talones'],
+    anim: [['stand', 'De pie'], ['gobletDown', 'Abajo y mantén']] },
+  { id: 'st-hombros', name: 'Estiramiento de hombros', en: 'overhead shoulder stretch', group: 'Movilidad', type: 'Estiramiento', load: 'none', level: 1,
+    muscles: ['hombros', 'espalda', 'pecho'], desc: 'Lleva los brazos por encima de la cabeza, estírate hacia arriba y luego abre el pecho llevando los brazos atrás.',
+    cues: ['Costillas abajo', 'Respira profundo'], mistakes: ['Encoger los hombros hacia las orejas'],
+    anim: [['stand', 'Brazos abajo'], ['overhead', 'Estira hacia arriba']] },
+);
+
 EXERCISES.forEach(e => {
   e.photos = (PHOTOS[e.id] || []).map(n => `fotos/${n}.jpg`);
   const anim = (e.anim || []).map(f => f[1]);
@@ -382,16 +402,103 @@ const PRESET_ROUTINES = [
       { ex: 'press', sets: 3, reps: 6, side: true, rest: 60 },
       { ex: 'rackcarry', sets: 2, secs: 30, side: true, rest: 45 },
     ] },
+
+  // Formatos con timer. EMOM: { emom: 60 } cada serie empieza al inicio de un minuto.
+  // Tabata: series por tiempo que arrancan solas con descanso fijo. Escalera: { ladder: [reps...] }.
+  // AMRAP: { amrap: minutos, circuit } la mayor cantidad de rondas posible.
+  { id: 'p-emom-swing', name: 'EMOM de swings', goal: 'condicion', minLevel: 1, format: 'EMOM',
+    desc: 'Al empezar cada minuto haces las reps; lo que sobra del minuto es tu descanso.',
+    blocks: [
+      { ex: 'halo', sets: 1, reps: 8, rest: 20 },
+      { ex: 'swing2', sets: 10, reps: 15, emom: 60, fixedRest: true },
+      { ex: 'goblet', sets: 4, reps: 8, emom: 60, fixedRest: true },
+    ] },
+  { id: 'p-tabata', name: 'Tabata kettlebell', goal: 'condicion', minLevel: 1, format: 'Tabata',
+    desc: '20 segundos a tope, 10 de pausa, 8 veces por ejercicio. Corto y muy intenso.',
+    blocks: [
+      { ex: 'swing2', sets: 8, secs: 20, rest: 10, autoStart: true, fixedRest: true },
+      { ex: 'goblet', sets: 8, secs: 20, rest: 10, autoStart: true, fixedRest: true },
+      { ex: 'russiantwist', sets: 8, secs: 20, rest: 10, autoStart: true, fixedRest: true },
+    ] },
+  { id: 'p-amrap', name: 'AMRAP 15', goal: 'grasa', minLevel: 1, format: 'AMRAP',
+    desc: 'Todas las rondas que puedas en 15 minutos, con buena técnica.',
+    blocks: [
+      { amrap: 15, circuit: [
+        { ex: 'swing2', reps: 15 },
+        { ex: 'goblet', reps: 10 },
+        { ex: 'pushup', reps: 8 },
+        { ex: 'row', reps: 6, side: true },
+      ] },
+    ] },
+  { id: 'p-escalera', name: 'Escalera de press', goal: 'fuerza', minLevel: 1, format: 'Escalera',
+    desc: 'Subes de 1 a 5 repeticiones por escalón, con pausas cortas. Mucho volumen sin agotarte.',
+    blocks: [
+      { ladder: [1, 2, 3, 4, 5], circuit: [{ ex: 'press', side: true }], rest: 30 },
+      { ladder: [1, 2, 3, 4, 5], circuit: [{ ex: 'press', side: true }], rest: 30 },
+      { ex: 'swing2', sets: 3, reps: 15, rest: 45 },
+    ] },
 ];
 
 // Rotación semanal sugerida por objetivo (se filtra por nivel).
 const PROGRAMS = {
-  fuerza: ['p-intro', 'p-fuerza-a', 'p-fuerza-b', 'p-fuerza-doble', 'p-swing'],
-  grasa: ['p-swing', 'p-complejo', 'p-intervalos', 'p-musculo-inf'],
-  condicion: ['p-condicion', 'p-intervalos', 'p-swing', 'p-fuerza-a'],
+  fuerza: ['p-intro', 'p-fuerza-a', 'p-fuerza-b', 'p-escalera', 'p-fuerza-doble', 'p-swing'],
+  grasa: ['p-swing', 'p-complejo', 'p-amrap', 'p-intervalos', 'p-musculo-inf'],
+  condicion: ['p-condicion', 'p-tabata', 'p-emom-swing', 'p-intervalos', 'p-fuerza-a'],
   movilidad: ['p-movilidad', 'p-fuerza-a', 'p-movilidad', 'p-intervalos'],
   musculo: ['p-musculo-sup', 'p-musculo-inf', 'p-fuerza-a', 'p-fuerza-b'],
-  rendimiento: ['p-atleta-base', 'p-potencia', 'p-condicion', 'p-fuerza-b'],
+  rendimiento: ['p-atleta-base', 'p-potencia', 'p-condicion', 'p-emom-swing', 'p-fuerza-b'],
 };
+
+// Calentamiento (antes de cada rutina) y estiramientos (al final, según los músculos trabajados).
+const WARMUP = [
+  { ex: 'halo', secs: 30 }, { ex: 'aroundworld', secs: 30 }, { ex: 'st-sentadilla', secs: 30 }, { ex: 'swing2', secs: 20 },
+];
+const COOLDOWN_FOR = {
+  isquios: 'st-isquios', gluteos: 'st-isquios', piernas: 'st-cadera', hombros: 'st-hombros', pecho: 'st-hombros', espalda: 'st-hombros', core: 'st-sentadilla',
+};
+
+// "¿Cómo te sientes hoy?": qué ejercicio usar en vez de otro si hay molestias (null = se quita).
+const PAINS = { hombro: 'Hombro', espalda: 'Espalda baja', rodilla: 'Rodilla', muneca: 'Muñeca' };
+const PAIN_SWAPS = {
+  hombro: { press: 'floorpress', dpress: 'floorpress', pushpress: 'floorpress', cleanpress: 'clean', snatch: 'swing2', thruster: 'goblet', windmill: 'russiantwist', tgu: 'russiantwist', halo: 'aroundworld', highpull: 'swing2', 'st-hombros': 'st-isquios' },
+  espalda: { swing2: 'goblet', swing1: 'goblet', swingalt: 'goblet', dswing: 'goblet', deadlift: 'goblet', rdl: 'lunge', sldl: 'lunge', row: 'floorpress', gorillarow: 'floorpress', snatch: 'goblet', clean: 'goblet', dclean: 'goblet', highpull: 'press', russiantwist: null, figure8: 'aroundworld', windmill: null, suitcase: 'rackcarry' },
+  rodilla: { goblet: 'deadlift', frontsq: 'rdl', dfrontsq: 'rdl', lunge: 'sldl', thruster: 'press', 'st-sentadilla': 'st-isquios', 'st-cadera': 'st-isquios' },
+  muneca: { pushup: 'russiantwist', clean: 'swing2', dclean: 'dswing', snatch: 'swing1', cleanpress: 'swing1', floorpress: 'row', plankdrag: 'russiantwist' },
+};
+
+// Programa de 8 semanas: multiplica el volumen y marca semanas de descarga y de test.
+const PROGRAM_WEEKS = [
+  { name: 'Adaptación', vol: 1 }, { name: 'Construcción', vol: 1.15 }, { name: 'Construcción', vol: 1.3 },
+  { name: 'Descarga y test', vol: 0.6, test: true },
+  { name: 'Intensificación', vol: 1.15 }, { name: 'Intensificación', vol: 1.3 }, { name: 'Pico', vol: 1.4 },
+  { name: 'Descarga y test final', vol: 0.6, test: true },
+];
+
+// Tests para medir tu progreso cada 4 semanas.
+const TESTS = [
+  { id: 'swing2min', name: 'Swings en 2 minutos', ex: 'swing2', secs: 120, unit: 'swings', desc: 'Todos los swings que puedas en 2 minutos con tu pesa de swing. Puedes pausar, el reloj sigue.' },
+  { id: 'goblet1min', name: 'Sentadillas goblet en 1 minuto', ex: 'goblet', secs: 60, unit: 'sentadillas', desc: 'Sentadillas completas con buena técnica en 1 minuto.' },
+  { id: 'pushupmax', name: 'Flexiones máximas', ex: 'pushup', secs: 0, unit: 'flexiones', desc: 'Todas las flexiones seguidas que puedas, sin pausa, con el cuerpo recto.' },
+  { id: 'snatch5', name: 'Arrancadas en 5 minutos', ex: 'snatch', secs: 300, unit: 'arrancadas', minLevel: 3, desc: 'El clásico test de arrancadas: cambia de mano cuando quieras.' },
+];
+
+// Desafíos mensuales: `measure` indica qué se cuenta en el mes.
+const CHALLENGES = [
+  { id: 'swings', name: '5.000 swings', icon: 'kb', target: 5000, unit: 'swings', measure: 'reps', exs: ['swing2', 'swing1', 'swingalt', 'dswing'] },
+  { id: 'squats', name: '1.000 sentadillas', icon: 'bolt', target: 1000, unit: 'sentadillas', measure: 'reps', exs: ['goblet', 'frontsq', 'dfrontsq', 'thruster'] },
+  { id: 'sessions', name: '12 entrenamientos', icon: 'calendar', target: 12, unit: 'sesiones', measure: 'sessions' },
+  { id: 'days', name: '20 días activos', icon: 'flame', target: 20, unit: 'días', measure: 'days' },
+  { id: 'tons', name: '20 toneladas', icon: 'scale', target: 20000, unit: 'kg', measure: 'volume' },
+  { id: 'kcal', name: '5.000 calorías', icon: 'heart', target: 5000, unit: 'kcal', measure: 'kcal' },
+];
+
+// Rangos según tus puntos (XP).
+const RANKS = [
+  { name: 'Novato', xp: 0 }, { name: 'Bronce', xp: 300 }, { name: 'Hierro', xp: 1000 },
+  { name: 'Acero', xp: 2500 }, { name: 'Titanio', xp: 5000 }, { name: 'Leyenda', xp: 10000 },
+];
+
+// Gasto energético aproximado (MET) por tipo de ejercicio, para estimar calorías.
+const MET_BY_TYPE = { 'Balístico': 9.8, 'Fuerza': 6, 'Carga': 6.5, 'Core': 4.5, 'Movilidad': 3, 'Estiramiento': 2.3 };
 
 const BELL_SIZES = [4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 28, 32, 36, 40, 48];

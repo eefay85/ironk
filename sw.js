@@ -2,9 +2,9 @@
 // Archivos de la app: primero la red (así llegan las actualizaciones) y, sin conexión, la copia guardada.
 // Fotos: primero la copia guardada (no cambian).
 
-const CACHE = 'ironk-v3';
+const CACHE = 'ironk-v4';
 const APP = [
-  './', 'index.html', 'styles.css', 'config.js', 'vendor/supabase.js', 'icons.js', 'data.js', 'poses.js', 'coach.js', 'app.js', 'sync.js',
+  './', 'index.html', 'styles.css', 'config.js', 'vendor/supabase.js', 'icons.js', 'data.js', 'poses.js', 'coach.js', 'voice.js', 'app.js', 'sync.js',
   'manifest.webmanifest', 'icon.png', 'icon-192.png', 'icon-512.png', 'apple-touch-icon.png',
 ];
 

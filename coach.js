@@ -49,7 +49,13 @@ function fmtKg(n) { return n >= 1000 ? `${(n / 1000).toFixed(1).replace('.0', ''
 function buildSteps(r) {
   const steps = [];
   r.blocks.forEach(b => {
-    if (b.circuit) {
+    if (b.amrap) return; // el AMRAP corre con su propio modo (ver startAmrap)
+    if (b.ladder) {
+      b.ladder.forEach((rung, k) => b.circuit.forEach((it, j) => steps.push({
+        ...it, reps: rung, label: `Escalón ${k + 1}/${b.ladder.length}`,
+        rest: j === b.circuit.length - 1 ? (b.rest ?? 30) : 0,
+      })));
+    } else if (b.circuit) {
       for (let i = 1; i <= b.rounds; i++) {
         b.circuit.forEach((it, j) => steps.push({
           ...it, label: `Ronda ${i}/${b.rounds}`,
@@ -66,16 +72,32 @@ function buildSteps(r) {
 
 function estimateMin(r) {
   const sec = buildSteps(r).reduce((a, s) => {
+    if (s.emom) return a + s.emom;
     const work = (s.secs || (s.reps || 0) * 3.5) * (s.side ? 2 : 1);
-    return a + work + (s.rest || 0) + 12;
-  }, 0);
+    return a + work + (s.rest || 0) + (s.autoStart ? 0 : 12);
+  }, 0) + r.blocks.reduce((a, b) => a + (b.amrap || 0) * 60, 0);
   return Math.max(5, Math.round(sec / 60));
 }
 
+const isAmrap = r => r.blocks.some(b => b.amrap);
+
 function routineItems(r) {
   const out = [];
-  r.blocks.forEach(b => (b.circuit || [b]).forEach(it => out.push({ ...it, sets: b.circuit ? b.rounds : it.sets, circuit: !!b.circuit })));
+  r.blocks.forEach(b => (b.circuit || [b]).forEach(it => out.push({
+    ...it, sets: b.circuit ? (b.ladder ? b.ladder.length : b.rounds) : it.sets, circuit: !!b.circuit && !b.ladder,
+    ladder: b.ladder, amrap: b.amrap, emom: b.emom, autoStart: b.autoStart,
+  })));
   return out;
+}
+
+// Texto de cada ejercicio en el detalle de rutina ("4 × 6 reps", "Escalera 1→5", "AMRAP 15 min"...).
+function itemText(it) {
+  const side = it.side ? ' por lado' : '';
+  if (it.amrap) return `${it.reps} reps${side} · ronda tras ronda`;
+  if (it.ladder) return `Escalera ${it.ladder[0]}→${it.ladder[it.ladder.length - 1]} reps${side}`;
+  if (it.emom) return `${it.sets} min · ${it.reps} reps${side} al inicio de cada minuto`;
+  if (it.autoStart) return `${it.sets} × ${it.secs} s a tope · ${it.rest} s pausa`;
+  return `${it.sets} × ${it.secs ? `${it.secs} s` : `${it.reps} rep${it.reps === 1 ? '' : 's'}`}${side}`;
 }
 
 function mainMuscles(r, n = 3) {
@@ -110,25 +132,42 @@ function adaptRoutine(r) {
       out.ex = ex.id;
       out.side = !!ex.uni;
     }
-    if (!inCircuit && !r.custom) {
+    if (!inCircuit && !r.custom && !it.autoStart) {
       if (L === 1 && out.sets >= 3) out.sets -= 1;
       if (L === 3 && out.sets >= 3 && out.sets < 8) out.sets += 1;
     }
+    if (it.fixedRest) return out; // EMOM y Tabata tienen su propio ritmo
     if (out.rest && !r.custom) out.rest = Math.max(inCircuit ? 10 : 20, out.rest + restBonus);
     out.rest = scaleRest(out.rest);
     return out;
   };
-  let blocks = r.blocks.map(b => b.circuit
-    ? { ...b, rounds: r.custom ? b.rounds : Math.max(2, b.rounds + (L === 1 ? -1 : L === 3 ? 1 : 0)), restRound: scaleRest((b.restRound ?? 60) + (r.custom ? 0 : Math.max(0, restBonus))), circuit: b.circuit.map(it => adj(it, true)) }
-    : adj(b, false));
+  let blocks = r.blocks.map(b => {
+    if (b.amrap) return { ...b, amrap: r.custom ? b.amrap : Math.max(8, b.amrap + (L === 1 ? -3 : L === 3 ? 3 : 0)), circuit: b.circuit.map(it => adj(it, true)) };
+    if (b.ladder) return { ...b, rest: scaleRest(b.rest), circuit: b.circuit.map(it => adj(it, true)) };
+    if (b.circuit) return { ...b, rounds: r.custom ? b.rounds : Math.max(2, b.rounds + (L === 1 ? -1 : L === 3 ? 1 : 0)), restRound: scaleRest((b.restRound ?? 60) + (r.custom ? 0 : Math.max(0, restBonus))), circuit: b.circuit.map(it => adj(it, true)) };
+    return adj(b, false);
+  });
+
+  // Programa de 8 semanas: más o menos volumen según la semana.
+  const wk = programWeek();
+  if (wk && !wk.done && !r.custom && wk.vol !== 1) {
+    blocks = blocks.map(b => {
+      if (b.amrap) return { ...b, amrap: Math.max(8, Math.round(b.amrap * wk.vol)) };
+      if (b.ladder || b.autoStart) return b;
+      if (b.circuit) return { ...b, rounds: Math.max(2, Math.round(b.rounds * wk.vol)) };
+      return { ...b, sets: Math.max(1, Math.round(b.sets * wk.vol)) };
+    });
+    notes.push(`Semana ${wk.n} de 8 · ${wk.name}`);
+  }
 
   // Recortar para que entre en el tiempo que elegiste.
-  const target = p.minutes || 30;
+  const target = (p.minutes || 30) * Math.max(1, wk && !wk.done ? wk.vol : 1);
   let trimmed = false;
   for (let guard = 0; guard < 30 && !r.custom; guard++) {
     if (estimateMin({ blocks }) <= target * 1.15) break;
     let best = null;
     blocks.forEach(b => {
+      if (b.amrap || b.ladder || b.autoStart) return;
       const n = b.circuit ? b.rounds : b.sets;
       if (n > 2 && (!best || n > (best.circuit ? best.rounds : best.sets))) best = b;
     });
@@ -136,8 +175,190 @@ function adaptRoutine(r) {
     if (best.circuit) best.rounds--; else best.sets--;
     trimmed = true;
   }
-  if (trimmed) notes.push(`Ajustada a tus ${target} min`);
+  if (trimmed) notes.push(`Ajustada a tus ${p.minutes || 30} min`);
   return { ...r, blocks, notes: [...new Set(notes)] };
+}
+
+// ---------- "¿Cómo te sientes hoy?" ----------
+
+// c: { energy: 'baja'|'normal'|'alta', sleep: 'mal'|'regular'|'bien', pains: ['hombro', ...] }
+function applyCheckin(r, c) {
+  if (!c) return { routine: r, notes: [], weightDown: false };
+  const notes = [];
+  const tired = c.energy === 'baja' || c.sleep === 'mal';
+  const veryTired = c.energy === 'baja' && c.sleep === 'mal';
+  const swapFor = id => {
+    for (const p of c.pains || []) {
+      const map = PAIN_SWAPS[p] || {};
+      if (id in map) return { to: map[id], pain: p };
+    }
+    return null;
+  };
+  const fixItem = it => {
+    const s = swapFor(it.ex);
+    if (!s) return it;
+    notes.push(s.to ? `${exById(it.ex).name} → ${exById(s.to).name} (${PAINS[s.pain].toLowerCase()})` : `Sin ${exById(it.ex).name.toLowerCase()} (${PAINS[s.pain].toLowerCase()})`);
+    return s.to ? { ...it, ex: s.to, side: !!exById(s.to).uni } : null;
+  };
+  let blocks = r.blocks.map(b => {
+    if (b.circuit) {
+      const circuit = b.circuit.map(fixItem).filter(Boolean);
+      if (!circuit.length) return null;
+      const nb = { ...b, circuit };
+      if (tired && b.rounds) nb.rounds = Math.max(2, Math.round(b.rounds * 0.75));
+      if (tired && b.amrap) nb.amrap = Math.max(8, Math.round(b.amrap * 0.75));
+      return nb;
+    }
+    const nb = fixItem(b);
+    if (!nb) return null;
+    if (tired && !nb.autoStart) nb.sets = Math.max(Math.min(2, nb.sets), Math.round(nb.sets * 0.75));
+    return nb;
+  }).filter(Boolean);
+  if (tired) notes.unshift(veryTired ? 'Día de poca energía: menos volumen y una pesa más liviana' : 'Menos volumen para que llegues bien');
+  if (c.energy === 'alta' && c.sleep === 'bien') notes.unshift('¡Gran día! Buen momento para buscar un récord');
+  if ((c.pains || []).length) notes.push('Si el dolor es fuerte o no mejora, consulta a un profesional.');
+  return { routine: { ...r, blocks }, notes, weightDown: veryTired };
+}
+
+// ---------- Calentamiento y vuelta a la calma ----------
+
+function withWarmupCooldown(steps, r) {
+  if (db.profile.warmup === false || !steps.length) return steps;
+  const warm = WARMUP.map((w, i) => ({
+    ...w, autoStart: true, noLog: true, phase: 'warmup', label: `Calentamiento ${i + 1}/${WARMUP.length}`,
+    rest: i === WARMUP.length - 1 ? 20 : 5,
+  }));
+  const cool = [...new Set(mainMuscles(r, 4).map(m => COOLDOWN_FOR[m]).filter(Boolean))].slice(0, 3);
+  if (!cool.includes('st-isquios') && cool.length < 3) cool.push('st-isquios');
+  const coolSteps = cool.map((ex, i) => ({
+    ex, secs: 30, side: ex === 'st-cadera', autoStart: true, noLog: true, phase: 'cooldown',
+    label: `Estiramiento ${i + 1}/${cool.length}`, rest: i === cool.length - 1 ? 0 : 5,
+  }));
+  const main = steps.map((s, i) => i === steps.length - 1 ? { ...s, rest: 15 } : s);
+  return [...warm, ...main, ...coolSteps];
+}
+
+// ---------- Entrenamiento rápido ----------
+
+const QUICK_FOCUS = {
+  completo: { name: 'Cuerpo completo', test: () => true },
+  superior: { name: 'Tren superior', test: e => ['Hombros', 'Pecho', 'Espalda'].includes(e.group) && e.type !== 'Movilidad' },
+  inferior: { name: 'Tren inferior', test: e => ['Cadera', 'Piernas'].includes(e.group) },
+  core: { name: 'Core', test: e => e.group === 'Core' },
+  cardio: { name: 'Cardio', test: e => e.type === 'Balístico' || ['swing2', 'goblet', 'pushup', 'russiantwist'].includes(e.id) },
+};
+
+// Arma un circuito con ejercicios de tu nivel y la pesa elegida, para los minutos que tienes.
+function generateQuick({ minutes = 15, focus = 'completo', bell = null } = {}) {
+  const L = level();
+  const pairs = db.bells.some(b => b.qty >= 2);
+  const pool = EXERCISES.filter(e => e.type !== 'Estiramiento' && e.level <= L && (!e.double || (pairs && !bell))
+    && e.type !== 'Carga' && QUICK_FOCUS[focus].test(e));
+  const shuffled = pool.sort(() => Math.random() - 0.5);
+  const picked = [];
+  for (const e of shuffled) {
+    if (picked.length >= 4) break;
+    if (picked.some(p => p.group === e.group) && shuffled.length > 6 && focus === 'completo') continue;
+    picked.push(e);
+  }
+  for (const e of shuffled) { if (picked.length >= 4) break; if (!picked.includes(e)) picked.push(e); }
+  const circuit = picked.map(e => ({
+    ex: e.id, side: !!e.uni, rest: 15,
+    ...(e.type === 'Core' && !['russiantwist'].includes(e.id) ? { secs: 30 } : { reps: e.type === 'Balístico' ? 12 : e.uni ? 6 : 10 }),
+  }));
+  const r = { id: 'quick', custom: true, quick: true, name: `Rápido · ${QUICK_FOCUS[focus].name}`, goal: goalsOf()[0], bell,
+    desc: `${minutes} minutos${bell ? ` con una pesa de ${bell} kg` : ''}.`, blocks: [{ circuit, rounds: 1, restRound: 45 }] };
+  const perRound = circuit.reduce((a, s) => a + (s.secs || s.reps * 3.5) * (s.side ? 2 : 1) + s.rest + 12, 0) + 45;
+  r.blocks[0].rounds = Math.max(2, Math.min(10, Math.round((minutes * 60) / perRound)));
+  return r;
+}
+
+// ---------- Programa de 8 semanas ----------
+
+function programWeek(p = db.profile) {
+  if (!p?.program?.start) return null;
+  const idx = Math.floor((Date.now() - new Date(p.program.start).getTime()) / (7 * DAY));
+  if (idx >= PROGRAM_WEEKS.length) return { done: true, n: idx + 1 };
+  return { n: idx + 1, ...PROGRAM_WEEKS[Math.max(0, idx)] };
+}
+
+// ---------- Calorías y puntos ----------
+
+// Calorías ≈ MET × peso corporal × horas, ajustado por el esfuerzo que marcaste.
+function estimateKcal(sets, durationSec, effort, bodyKg = db.profile?.weight || 75) {
+  const counted = sets.filter(s => !s.noLog);
+  const met = counted.length
+    ? counted.reduce((a, s) => a + (MET_BY_TYPE[exById(s.ex).type] || 6), 0) / counted.length
+    : 6;
+  return Math.round(met * bodyKg * (durationSec / 3600) * (0.8 + (effort || 7) * 0.03));
+}
+const sessionKcal = s => s.kcal ?? estimateKcal(s.sets, s.duration || 0, s.effort);
+
+function sessionXp(s) { return Math.round((s.duration || 0) / 60) + s.sets.length * 2 + (s.prs?.length || 0) * 25; }
+function totalXp() {
+  return db.sessions.reduce((a, s) => a + sessionXp(s), 0) + (db.tests || []).length * 20 + challengesDone().length * 200;
+}
+function rankInfo(xp = totalXp()) {
+  let i = 0;
+  while (i < RANKS.length - 1 && xp >= RANKS[i + 1].xp) i++;
+  const cur = RANKS[i], next = RANKS[i + 1];
+  return { xp, rank: cur.name, idx: i, next: next?.name, toNext: next ? next.xp - xp : 0, pct: next ? (xp - cur.xp) / (next.xp - cur.xp) : 1 };
+}
+
+// ---------- Tests ----------
+
+function testsFor() { return TESTS.filter(t => (t.minLevel || 1) <= level()); }
+function testHistory(id) { return (db.tests || []).filter(t => t.test === id).sort((a, b) => new Date(a.date) - new Date(b.date)); }
+function testDue() {
+  const all = db.tests || [];
+  const last = all.length ? Math.max(...all.map(t => new Date(t.date).getTime())) : 0;
+  const wk = programWeek();
+  if (wk && wk.test) return true;
+  return db.sessions.length >= 4 && Date.now() - last > 28 * DAY;
+}
+
+// ---------- Desafíos mensuales ----------
+
+const monthKey = (d = new Date()) => { d = new Date(d); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; };
+function monthSessions(key) { return db.sessions.filter(s => monthKey(s.date) === key); }
+
+function challengeProgress(ch, key = monthKey()) {
+  const list = monthSessions(key);
+  switch (ch.measure) {
+    case 'reps': return list.reduce((a, s) => a + s.sets.filter(x => ch.exs.includes(x.ex)).reduce((b, x) => b + (x.reps || 0) * (x.side ? 2 : 1), 0), 0);
+    case 'sessions': return list.length;
+    case 'days': return new Set(list.map(s => dayKey(s.date))).size;
+    case 'volume': return Math.round(list.reduce((a, s) => a + sessionVolume(s), 0));
+    case 'kcal': return list.reduce((a, s) => a + sessionKcal(s), 0);
+    default: return 0;
+  }
+}
+const joinedChallenges = (key = monthKey()) => (db.challenges || []).filter(c => c.month === key).map(c => CHALLENGES.find(x => x.id === c.ch)).filter(Boolean);
+function challengesDone() {
+  return (db.challenges || []).filter(c => {
+    const ch = CHALLENGES.find(x => x.id === c.ch);
+    return ch && challengeProgress(ch, c.month) >= ch.target;
+  });
+}
+
+// ---------- Resumen del mes ----------
+
+function monthStats(key) {
+  const list = monthSessions(key);
+  const weeks = {};
+  list.forEach(s => { const w = weekStart(s.date).getTime(); weeks[w] = (weeks[w] || 0) + sessionVolume(s); });
+  const exCount = {};
+  list.forEach(s => s.sets.filter(x => !x.noLog).forEach(x => { exCount[x.ex] = (exCount[x.ex] || 0) + 1; }));
+  const topEx = Object.entries(exCount).sort((a, b) => b[1] - a[1])[0];
+  const days = [...new Set(list.map(s => dayKey(s.date)))].sort();
+  let streak = 0, cur = 0, prev = null;
+  days.forEach(k => { const t = new Date(k + 'T12:00').getTime(); cur = prev && Math.round((t - prev) / DAY) === 1 ? cur + 1 : 1; streak = Math.max(streak, cur); prev = t; });
+  return {
+    sessions: list.length, days: days.length, volume: list.reduce((a, s) => a + sessionVolume(s), 0),
+    time: list.reduce((a, s) => a + (s.duration || 0), 0), kcal: list.reduce((a, s) => a + sessionKcal(s), 0),
+    prs: list.flatMap(s => s.prs || []), bestWeek: Math.max(0, ...Object.values(weeks)), topEx: topEx ? exById(topEx[0]).name : null,
+    streak, xp: list.reduce((a, s) => a + sessionXp(s), 0),
+  };
 }
 
 // ---------- Pesas sugeridas y progresión ----------
@@ -339,6 +560,15 @@ function longestStreak() {
 function insights() {
   const s = db.sessions, out = [];
   if (!s.length) return [{ icon: 'spark', text: 'Completa tu primera sesión y aquí verás cómo avanzas.' }];
+  if (testDue()) out.push({ icon: 'target', text: 'Es buen momento para un test y medir cuánto mejoraste.', action: 'go-tests', label: 'Ver' });
+  const prevKey = monthKey(new Date(new Date().getFullYear(), new Date().getMonth() - 1, 15));
+  if (new Date().getDate() <= 7 && monthSessions(prevKey).length) {
+    out.push({ icon: 'spark', text: 'Tu resumen del mes pasado está listo.', action: 'go-wrapped-prev', label: 'Ver' });
+  }
+  joinedChallenges().forEach(ch => {
+    const v = challengeProgress(ch);
+    if (v < ch.target) out.push({ icon: ch.icon, text: `Desafío ${ch.name}: llevas ${v.toLocaleString('es-AR')} de ${ch.target.toLocaleString('es-AR')}.` });
+  });
   const ws = weekStart(new Date()).getTime();
   const volThis = sessionsBetween(ws, Infinity).reduce((a, x) => a + sessionVolume(x), 0);
   const volPrev = sessionsBetween(ws - 7 * DAY, ws).reduce((a, x) => a + sessionVolume(x), 0);
@@ -405,6 +635,11 @@ const ACHIEVEMENTS = [
   { id: 'ex15', icon: 'layers', name: 'Explorador', desc: 'Prueba 15 ejercicios distintos', test: st => st.exercises >= 15 },
   { id: 'early', icon: 'clock', name: 'Madrugador', desc: 'Entrena antes de las 8 de la mañana', test: st => st.early },
   { id: 'long', icon: 'timer', name: 'Maratón', desc: 'Una sesión de 45 minutos o más', test: st => st.longest >= 45 * 60 },
+  { id: 'test1', icon: 'target', name: 'A prueba', desc: 'Haz tu primer test', test: st => st.tests >= 1 },
+  { id: 'ch1', icon: 'medal', name: 'Desafío cumplido', desc: 'Completa un desafío mensual', test: st => st.challenges >= 1 },
+  { id: 'ch3', icon: 'trophy', name: 'Coleccionista', desc: 'Completa 3 desafíos mensuales', test: st => st.challenges >= 3 },
+  { id: 'kcal10', icon: 'heart', name: 'Horno', desc: 'Quema 10.000 calorías en total', test: st => st.kcal >= 10000 },
+  { id: 'prog8', icon: 'calendar', name: 'Programa completo', desc: 'Termina el programa de 8 semanas', test: st => st.programDone },
 ];
 
 function achievementStats() {
@@ -418,5 +653,9 @@ function achievementStats() {
     exercises: new Set(s.flatMap(x => x.sets.map(y => y.ex))).size,
     early: s.some(x => new Date(x.date).getHours() < 8),
     longest: Math.max(0, ...s.map(x => x.duration || 0)),
+    tests: (db.tests || []).length,
+    challenges: challengesDone().length,
+    kcal: s.reduce((a, x) => a + sessionKcal(x), 0),
+    programDone: !!programWeek()?.done || !!db.profile?.programDone,
   };
 }
