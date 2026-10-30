@@ -92,6 +92,28 @@ function setRing(id, pct) {
   el.setAttribute('stroke-dashoffset', (c * (1 - Math.min(1, Math.max(0, pct)))).toFixed(1));
 }
 
+// Selección de objetivos (hasta 3); el número indica el orden en que los elegiste.
+function goalOptions(selected, act, compact = false) {
+  if (compact) {
+    return `<div class="chips">${Object.entries(GOALS).map(([k, v]) => {
+      const n = selected.indexOf(k) + 1;
+      return `<button class="chip ${n ? 'on' : ''}" data-act="${act}" data-id="${k}">${n ? `${n} · ` : ''}${v}</button>`;
+    }).join('')}</div>`;
+  }
+  return `<div class="options">${Object.entries(GOALS).map(([k, v]) => {
+    const n = selected.indexOf(k) + 1;
+    return `<button class="option ${n ? 'on' : ''}" data-act="${act}" data-id="${k}">
+      <span class="opt-ico">${icon(GOAL_INFO[k].icon, 22)}</span><span class="grow"><strong>${v}</strong><small>${GOAL_INFO[k].text}</small></span>
+      ${n ? `<span class="num">${n}</span>` : ''}</button>`;
+  }).join('')}</div>`;
+}
+
+function toggleGoal(list, g) {
+  if (list.includes(g)) return list.filter(x => x !== g);
+  if (list.length >= 3) { toast('Puedes elegir hasta 3 objetivos'); return list; }
+  return [...list, g];
+}
+
 const restSeg = () => `<div class="seg">${Object.entries(REST_MODES).map(([k, m]) =>
   `<button class="${(REST_MODES[db.profile.rest] ? db.profile.rest : 'auto') === k ? 'on' : ''}" data-act="rest-mode" data-id="${k}">${m.name}</button>`).join('')}</div>`;
 
@@ -159,7 +181,7 @@ function startOnboarding(fromStep = 0) {
   const p = db.profile || {};
   const d = {
     name: p.name || '', sex: p.sex || '', age: p.age || '', weight: p.weight || '', height: p.height || '',
-    level: p.level || 0, goal: p.goal || '', days: p.days || 3, minutes: p.minutes || 30,
+    level: p.level || 0, goals: p.goal ? goalsOf(p) : [], days: p.days || 3, minutes: p.minutes || 30,
     bells: db.bells.length ? db.bells.map(b => b.weight) : [],
   };
   stack = [];
@@ -199,8 +221,8 @@ views.onboarding = () => {
       <div class="options">${[1, 2, 3].map(n => choice('level', n, `${levelDots(n)} ${LEVELS[n].name}`, LEVELS[n].text)).join('')}</div>
       ${nav()}`;
   } else if (step === 4) {
-    body = `<h2 class="ob-q">¿Cuál es tu objetivo principal?</h2>
-      <div class="options">${Object.entries(GOALS).map(([k, v]) => choice('goal', k, v, GOAL_INFO[k].text, GOAL_INFO[k].icon)).join('')}</div>
+    body = `<h2 class="ob-q">¿Qué quieres lograr?</h2><p class="muted">Elige hasta 3 objetivos. Tu programa va a combinar rutinas de todos.</p>
+      ${goalOptions(d.goals, 'ob-goal')}
       ${nav()}`;
   } else if (step === 5) {
     body = `<h2 class="ob-q">Tu semana</h2><p class="muted">¿Cuántos días quieres entrenar?</p>
@@ -220,7 +242,7 @@ views.onboarding = () => {
     const missing = owned.length && Math.abs(snapBell(ideal, owned) - ideal) >= 4;
     body = `<div class="ob-hero"><div class="ob-logo ok">${icon('check', 48)}</div><h1>Tu plan está listo${p.name ? ', ' + esc(p.name) : ''}</h1></div>
       <div class="card">
-        <div class="kv"><span>Objetivo</span><strong>${GOALS[p.goal]}</strong></div>
+        <div class="kv"><span>Objetivo${goalsOf(p).length > 1 ? 's' : ''}</span><strong>${goalsText(p)}</strong></div>
         <div class="kv"><span>Nivel</span><strong>${levelDots(p.level)} ${LEVELS[p.level].name}</strong></div>
         <div class="kv"><span>Meta semanal</span><strong>${p.days} sesiones de ~${p.minutes} min</strong></div>
         <div class="kv"><span>Pesa de swing sugerida</span><strong>${ideal} kg</strong></div>
@@ -239,13 +261,13 @@ function obNext() {
   if (step === 1 && (!d.sex || !num(d.age))) return toast('Completa sexo y edad');
   if (step === 2 && !num(d.weight)) return toast('Ingresa tu peso');
   if (step === 3 && !d.level) return toast('Elige tu nivel');
-  if (step === 4 && !d.goal) return toast('Elige un objetivo');
+  if (step === 4 && !d.goals.length) return toast('Elige al menos un objetivo');
   if (step === 6) {
     if (!d.bells.length) return toast('Marca al menos una pesa');
     const pairs = new Set(db.bells.filter(b => b.qty >= 2).map(b => b.weight));
     db.profile = {
       ...(db.profile || {}), name: d.name.trim(), sex: d.sex, age: num(d.age), weight: num(d.weight), height: num(d.height),
-      level: d.level, goal: d.goal, days: d.days, minutes: d.minutes, created: db.profile?.created || new Date().toISOString(),
+      level: d.level, goal: d.goals[0], goals: [...d.goals], days: d.days, minutes: d.minutes, created: db.profile?.created || new Date().toISOString(),
     };
     db.bells = d.bells.sort((a, b) => a - b).map(w => ({ weight: w, qty: pairs.has(w) ? 2 : 1 }));
     if (num(d.weight) && !db.bodyLog.some(b => dayKey(b.date) === dayKey(new Date()))) db.bodyLog.push({ date: new Date().toISOString(), weight: num(d.weight) });
@@ -333,7 +355,8 @@ views.train = () => {
   return `
     <h1>Entrenar</h1>
     <h2>${icon('repeat', 18, 'accent')} Tu programa</h2>
-    <p class="muted small">${GOALS[db.profile.goal]} · ${LEVELS[level()].name} · ${db.profile.days} días por semana</p>
+    <p class="muted small">${goalsText()} · ${LEVELS[level()].name} · ${db.profile.days} días por semana</p>
+    ${goalsOf().length > 1 ? `<div class="note">${icon('repeat', 18)}<span class="small">Cada rutina se mantiene completa y con su propia lógica; lo que se combina es el orden: se alternan rutinas de tus objetivos y se evita repetir músculos que todavía se recuperan.</span></div>` : ''}
     ${rot.map(r => routineCard(r, plan.routine?.id === r.id && plan.kind === 'train' ? '<span class="tag accent">Hoy</span>' : '')).join('')}
     <h2>Mis rutinas</h2>
     ${db.customRoutines.map(r => routineCard(r)).join('') || '<p class="muted small">Crea rutinas con tus ejercicios, series y descansos.</p>'}
@@ -824,7 +847,7 @@ views.profile = () => {
   const ideal = idealBell('heavy');
   return `
     <div class="prof-head"><div class="avatar big">${esc((p.name || 'K')[0].toUpperCase())}</div>
-      <div><h1 style="margin:0">${esc(p.name || 'Atleta IronK')}</h1><div class="muted small">${levelDots(p.level)} ${LEVELS[p.level].name} · ${GOALS[p.goal]}</div></div></div>
+      <div><h1 style="margin:0">${esc(p.name || 'Atleta IronK')}</h1><div class="muted small">${levelDots(p.level)} ${LEVELS[p.level].name} · ${goalsText(p)}</div></div></div>
     <h2>Datos personales</h2>
     <div class="card">
       <label class="field"><span>Nombre</span><input data-bind="p.name" value="${esc(p.name || '')}"></label>
@@ -840,7 +863,8 @@ views.profile = () => {
     <div class="card">
       <div class="muted small">Nivel</div>
       <div class="seg">${[1, 2, 3].map(n => `<button class="${p.level === n ? 'on' : ''}" data-act="p-set" data-field="level" data-id="${n}">${LEVELS[n].name}</button>`).join('')}</div>
-      <label class="field" style="margin-top:12px"><span>Objetivo</span><select data-bind="p.goal">${Object.entries(GOALS).map(([k, v]) => `<option value="${k}" ${p.goal === k ? 'selected' : ''}>${v}</option>`).join('')}</select></label>
+      <div class="muted small" style="margin-top:12px">Objetivos (hasta 3)</div>
+      ${goalOptions(goalsOf(p), 'p-goal', true)}
       <div class="muted small">Días por semana</div>
       <div class="seg">${[2, 3, 4, 5, 6].map(n => `<button class="${p.days === n ? 'on' : ''}" data-act="p-set" data-field="days" data-id="${n}">${n}</button>`).join('')}</div>
       <div class="muted small" style="margin-top:12px">Minutos por sesión</div>
@@ -969,6 +993,14 @@ const actions = {
   'rest-sub': () => {
     run.restEnd -= 15000; run.restTotal = Math.max(1000, run.restTotal - 15000);
     if (run.restEnd <= Date.now() + 500) { run.phase = 'work'; run.restEnd = null; render(); } else tick();
+  },
+  'ob-goal': el => { route.params.d.goals = toggleGoal(route.params.d.goals, el.dataset.id); render(); },
+  'p-goal': el => {
+    const goals = goalsOf();
+    if (goals.length === 1 && goals[0] === el.dataset.id) return toast('Necesitas al menos un objetivo');
+    db.profile.goals = toggleGoal(goals, el.dataset.id);
+    db.profile.goal = db.profile.goals[0];
+    touchSettings(); saveDb(); render();
   },
   'rest-mode': el => { db.profile.rest = el.dataset.id; touchSettings(); saveDb(); render(); },
   'rest-skip': () => { run.phase = 'work'; run.restEnd = null; render(); },

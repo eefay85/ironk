@@ -218,8 +218,18 @@ function suggestWeight(ex) {
 
 // ---------- Programa y plan del día ----------
 
+// Objetivos elegidos (hasta 3). `goal` sigue guardando el principal por compatibilidad.
+function goalsOf(p = db.profile) {
+  const list = (p?.goals?.length ? p.goals : [p?.goal]).filter(g => GOALS[g]);
+  return list.length ? list : ['fuerza'];
+}
+function goalsText(p = db.profile, sep = ' + ') { return goalsOf(p).map(g => GOALS[g]).join(sep); }
+
+// Con varios objetivos, alterna las rutinas de cada uno: A1, B1, A2, B2...
 function programRoutines() {
-  const ids = PROGRAMS[db.profile.goal] || PROGRAMS.fuerza;
+  const lists = goalsOf().map(g => PROGRAMS[g] || []);
+  const ids = [];
+  for (let i = 0; i < Math.max(...lists.map(l => l.length)); i++) lists.forEach(l => { if (l[i]) ids.push(l[i]); });
   const list = [...new Set(ids)].map(routineById).filter(r => r && routineFits(r));
   return list.length ? list : [routineById('p-fuerza-a')];
 }
@@ -268,7 +278,7 @@ function todayPlan() {
     if (!tired.length) {
       const reason = k > 0
         ? `Cambiamos el orden: ${[...skipped].map(m => MUSCLES[m].toLowerCase()).join(' y ')} todavía se recupera${skipped.size > 1 ? 'n' : ''}.`
-        : lastProg ? `Sigue tu programa para ${GOALS[p.goal].toLowerCase()}.` : 'Primera sesión de tu programa. ¡Vamos!';
+        : lastProg ? `Sigue tu programa: ${goalsText(p, ' y ').toLowerCase()}.` : 'Primera sesión de tu programa. ¡Vamos!';
       return { kind: 'train', routine: r, reason };
     }
     tired.forEach(m => skipped.add(m));
