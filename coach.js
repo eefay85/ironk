@@ -106,17 +106,30 @@ function mainMuscles(r, n = 3) {
   return Object.entries(score).sort((a, b) => b[1] - a[1]).slice(0, n).map(([m]) => m);
 }
 
+// ¿Tiene al menos un par de pesas iguales? (habilita los ejercicios dobles)
+const hasPair = () => db.bells.some(b => b.qty >= 2);
+
 function routineFits(r) {
   const L = level();
-  return (r.minLevel || 1) <= L && L <= (r.maxLevel || 3);
+  return (r.minLevel || 1) <= L && L <= (r.maxLevel || 3) && (!r.needsPair || hasPair());
+}
+
+// Cómo se adapta el plan a las pesas que tienes.
+function equipmentNote() {
+  const n = new Set(db.bells.map(b => b.weight)).size;
+  if (hasPair()) return 'Tienes un par de pesas iguales: tu plan incluye ejercicios dobles cuando tu nivel lo permite.';
+  if (n === 1) return 'Con una sola pesa progresas sumando repeticiones y series cada 2 semanas. Los ejercicios dobles se hacen con una pesa.';
+  return 'Sin un par de pesas iguales, los ejercicios dobles se cambian por su versión con una pesa. Subirás de pesa cuando completes el rango de repeticiones.';
 }
 
 // Ajusta series, descansos y ejercicios a tu nivel, edad y tiempo disponible.
 function adaptRoutine(r) {
   const p = db.profile, L = level(), notes = [];
+  // Baja a la variante más fácil si no es tu nivel, o a la de una pesa si no tienes un par.
+  const pair = hasPair();
   const swap = id => {
     let ex = exById(id), guard = 0;
-    while (ex.level > L && ex.easier && guard++ < 3) ex = exById(ex.easier);
+    while ((ex.level > L || (ex.double && !pair)) && ex.easier && guard++ < 3) ex = exById(ex.easier);
     return ex;
   };
   const restBonus = (L === 1 ? 15 : L === 3 ? -10 : 0) + (p.age >= 50 ? 15 : 0);
@@ -127,7 +140,7 @@ function adaptRoutine(r) {
   let progressed = 0;
   const adj = (it, inCircuit) => {
     let out = { ...it };
-    const ex = r.custom ? exById(it.ex) : swap(it.ex);
+    const ex = r.custom && (!exById(it.ex).double || pair) ? exById(it.ex) : swap(it.ex);
     if (ex.id !== it.ex) {
       notes.push(`${exById(it.ex).name} → ${ex.name}`);
       out.ex = ex.id;

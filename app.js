@@ -183,6 +183,7 @@ function startOnboarding(fromStep = 0) {
     name: p.name || '', sex: p.sex || '', age: p.age || '', weight: p.weight || '', height: p.height || '',
     level: p.level || 0, goals: p.goal ? goalsOf(p) : [], days: p.days || 3, minutes: p.minutes || 30,
     bells: db.bells.length ? db.bells.map(b => b.weight) : [],
+    pairs: db.bells.filter(b => b.qty >= 2).map(b => b.weight),
   };
   stack = [];
   route = { name: 'onboarding', params: { d, step: fromStep } };
@@ -234,7 +235,11 @@ views.onboarding = () => {
     const ideal = snapBell(baseSwingKg({ ...d, level: d.level || 1 }), BELL_SIZES);
     body = `<h2 class="ob-q">¿Qué pesas rusas tienes?</h2><p class="muted">Toca las que tengas. Para tu perfil, una buena pesa de swing es de <strong class="accent">${ideal} kg</strong>.</p>
       <div class="chips">${BELL_SIZES.map(w => `<button class="chip ${d.bells.includes(w) ? 'on' : ''}" data-act="ob-bell" data-id="${w}">${w} kg</button>`).join('')}</div>
-      <p class="muted small">Si tienes dos iguales podrás marcarlo en Perfil.</p>
+      ${d.bells.length ? `<h2 class="ob-q" style="font-size:20px;margin-top:22px">¿Cuántas tienes de cada una?</h2>
+        <p class="muted small">Con dos pesas iguales se suman ejercicios dobles (swing, press y sentadilla con una pesa en cada mano).</p>
+        <div class="card">${[...d.bells].sort((a, b) => a - b).map(w => `<div class="kv"><span>${icon('kb', 16, 'accent')} <strong>${w} kg</strong></span>
+          <div class="seg mini">${[[1, 'Una'], [2, 'Dos']].map(([n, l]) => `<button class="${(d.pairs.includes(w) ? 2 : 1) === n ? 'on' : ''}" data-act="ob-pair" data-id="${w}" data-n="${n}">${l}</button>`).join('')}</div></div>`).join('')}</div>`
+        : ''}
       ${nav('Ver mi plan')}`;
   } else {
     const p = db.profile, rot = programRoutines();
@@ -246,8 +251,10 @@ views.onboarding = () => {
         <div class="kv"><span>Nivel</span><strong>${levelDots(p.level)} ${LEVELS[p.level].name}</strong></div>
         <div class="kv"><span>Meta semanal</span><strong>${p.days} sesiones de ~${p.minutes} min</strong></div>
         <div class="kv"><span>Pesa de swing sugerida</span><strong>${ideal} kg</strong></div>
+        <div class="kv"><span>Tus pesas</span><strong>${db.bells.map(b => `${b.weight} kg${b.qty >= 2 ? ' ×2' : ''}`).join(' · ')}</strong></div>
       </div>
       ${missing ? `<div class="note">${icon('bulb', 18)}<span>Con tus pesas actuales vamos a ajustar. Más adelante te conviene sumar una de ~${ideal} kg.</span></div>` : ''}
+      <div class="note">${icon('bulb', 18)}<span>${equipmentNote()}</span></div>
       <h2>Tu rotación</h2>
       ${rot.map((r, i) => `<div class="list-item"><span class="num">${i + 1}</span><div class="grow">${esc(r.name)}<div class="muted small">~${estimateMin(adaptRoutine(r))} min</div></div></div>`).join('')}
       <p class="muted small" style="margin-top:12px">IronK elige cada día la rutina que toca, según tu descanso y cómo te fue. Los pesos suben solos cuando completas todo con margen.</p>
@@ -264,7 +271,7 @@ function obNext() {
   if (step === 4 && !d.goals.length) return toast('Elige al menos un objetivo');
   if (step === 6) {
     if (!d.bells.length) return toast('Marca al menos una pesa');
-    const pairs = new Set(db.bells.filter(b => b.qty >= 2).map(b => b.weight));
+    const pairs = new Set(d.pairs);
     db.profile = {
       ...(db.profile || {}), name: d.name.trim(), sex: d.sex, age: num(d.age), weight: num(d.weight), height: num(d.height),
       level: d.level, goal: d.goals[0], goals: [...d.goals], days: d.days, minutes: d.minutes, created: db.profile?.created || new Date().toISOString(),
@@ -374,7 +381,7 @@ function routineCard(r, badge = '') {
     <div class="thumb">${exerciseThumb(exById(items[0]?.ex))}</div>
     <div class="grow"><div class="row"><h3 class="grow">${esc(r.name)}</h3>${badge}</div>
       <div class="muted small">${r.custom ? 'Mi rutina' : esc(GOALS[r.goal])} · ~${estimateMin(a)} min · ${new Set(items.map(i => i.ex)).size} ejercicios</div>
-      <div class="meta">${r.custom ? '' : levelDots(r.minLevel || 1)}${r.format ? `<span class="tag accent">${r.format}</span>` : ''}${fits ? '' : '<span class="tag">No es tu nivel</span>'}</div></div>
+      <div class="meta">${r.custom ? '' : levelDots(r.minLevel || 1)}${r.format ? `<span class="tag accent">${r.format}</span>` : ''}${fits ? '' : `<span class="tag">${r.needsPair && !hasPair() ? 'Necesita 2 pesas iguales' : 'No es tu nivel'}</span>`}</div></div>
     <span class="muted">${icon('right', 18)}</span></div>`;
 }
 
@@ -1358,7 +1365,8 @@ views.profile = () => {
         <div class="seg mini">${[[true, 'Sí'], [false, 'No']].map(([v, l]) => `<button class="${(p.warmup !== false) === v ? 'on' : ''}" data-act="p-toggle" data-field="warmup" data-id="${v}">${l}</button>`).join('')}</div></div>
     </div>
     <h2>Mis pesas rusas</h2>
-    <div class="note">${icon('bulb', 18)}<span>Para tu perfil, la pesa ideal de swing es de <strong>${ideal} kg</strong>. Marca "×2" si tienes un par (para ejercicios dobles).</span></div>
+    <div class="note">${icon('bulb', 18)}<span>Para tu perfil, la pesa ideal de swing es de <strong>${ideal} kg</strong>. Marca "×2" si tienes dos iguales.</span></div>
+    <p class="muted small">${equipmentNote()}</p>
     <div class="card">${db.bells.length ? db.bells.slice().sort((a, b) => a.weight - b.weight).map(b => `
       <div class="list-item"><span class="bell">${icon('kb', 20)}</span><div class="grow"><strong>${b.weight} kg</strong></div>
         <button class="chip ${b.qty >= 2 ? 'on' : ''}" data-act="bell-pair" data-id="${b.weight}">×2</button>
@@ -1449,6 +1457,10 @@ const actions = {
   'ob-bell': el => {
     const w = Number(el.dataset.id), d = route.params.d;
     d.bells = d.bells.includes(w) ? d.bells.filter(x => x !== w) : [...d.bells, w]; render();
+  },
+  'ob-pair': el => {
+    const w = Number(el.dataset.id), d = route.params.d;
+    d.pairs = el.dataset.n === '2' ? [...new Set([...d.pairs, w])] : d.pairs.filter(x => x !== w); render();
   },
   'ob-next': () => obNext(),
   'ob-back': () => { route.params.step = Math.max(0, route.params.step - 1); render(); },

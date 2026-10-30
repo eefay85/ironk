@@ -312,7 +312,7 @@ const PRESET_ROUTINES = [
       { ex: 'tgu', sets: 3, reps: 1, side: true, rest: 60 },
       { ex: 'rackcarry', sets: 3, secs: 30, side: true, rest: 45 },
     ] },
-  { id: 'p-fuerza-doble', name: 'Fuerza con dos pesas', goal: 'fuerza', minLevel: 3,
+  { id: 'p-fuerza-doble', name: 'Fuerza con dos pesas', goal: 'fuerza', minLevel: 3, needsPair: true,
     desc: 'Los básicos dobles: más carga y más tensión total.',
     blocks: [
       { ex: 'dclean', sets: 5, reps: 3, rest: 60 },
